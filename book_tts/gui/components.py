@@ -19,18 +19,31 @@ def create_file_upload() -> gr.File:
 
 
 def create_tts_settings() -> Dict[str, gr.Component]:
+    from book_tts.utils.history import load_history
+    voices, styles = load_history()
+    if DEFAULT_VOICE not in voices:
+        voices.insert(0, DEFAULT_VOICE)
+    if styles:
+        # Keep existing styles, move DEFAULT_STYLE to front if present.
+        if DEFAULT_STYLE in styles:
+            styles.remove(DEFAULT_STYLE)
+        styles.insert(0, DEFAULT_STYLE)
+    else:
+        styles.insert(0, DEFAULT_STYLE)
+
     with gr.Group():
         gr.Markdown("### TTS Settings")
-        voice = gr.Textbox(
+        voice = gr.Dropdown(
             label="Voice",
+            choices=voices,
             value=DEFAULT_VOICE,
-            placeholder="e.g. 冰糖",
+            allow_custom_value=True,
         )
-        style = gr.Textbox(
+        style = gr.Dropdown(
             label="Style",
+            choices=styles,
             value=DEFAULT_STYLE,
-            lines=3,
-            placeholder="Voice style description",
+            allow_custom_value=True,
         )
         api_keys = gr.Textbox(
             label="API Keys (one per line)",

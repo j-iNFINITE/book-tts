@@ -22,6 +22,7 @@ from book_tts.tts.synthesizer import ParagraphSynthesizer
 from book_tts.tts.sml import strip_sml_tokens
 from book_tts.parsers.text_cleaner import TextCleaner
 from book_tts.utils.file_utils import sanitize_filename
+from book_tts.utils.history import record as history_record, load_history
 
 POLL_INTERVAL = 0.5
 
@@ -207,6 +208,10 @@ def create_app() -> gr.Blocks:
             base_url: str,
             output_dir: str,
         ) -> Generator:
+            # Record new voice/style values for future dropdown suggestions.
+            if voice and voice.strip():
+                history_record(voice=voice.strip(), style=(style or "").strip())
+
             if not file_paths:
                 gr.Warning("No file uploaded.")
                 yield {
@@ -297,6 +302,18 @@ def create_app() -> gr.Blocks:
                 stop_btn: gr.update(interactive=False),
             }
 
+        def refresh_settings_choices() -> dict:
+            voices, styles = load_history()
+            if DEFAULT_VOICE not in voices:
+                voices.insert(0, DEFAULT_VOICE)
+            if DEFAULT_STYLE in styles:
+                styles.remove(DEFAULT_STYLE)
+            styles.insert(0, DEFAULT_STYLE)
+            return {
+                tts_settings["voice"]: gr.update(choices=voices),
+                tts_settings["style"]: gr.update(choices=styles),
+            }
+
         convert_btn.click(
             fn=update_stop_state,
             inputs=[],
@@ -322,6 +339,11 @@ def create_app() -> gr.Blocks:
             fn=re_enable_convert,
             inputs=[],
             outputs=[convert_btn, stop_btn],
+            queue=False,
+        ).then(
+            fn=refresh_settings_choices,
+            inputs=[],
+            outputs=[tts_settings["voice"], tts_settings["style"]],
             queue=False,
         )
 

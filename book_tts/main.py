@@ -183,6 +183,9 @@ def _process_file(args: argparse.Namespace, input_path: Path) -> None:
     voice = args.voice or DEFAULT_VOICE
     style = args.style or ""
     base_url = args.base_url or os.environ.get(_ENV_BASE_URL_VAR) or DEFAULT_BASE_URL
+
+    from book_tts.utils.history import record as history_record
+    history_record(voice=voice, style=style)
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
