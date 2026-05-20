@@ -1,0 +1,16 @@
+# Core dependencies
+ebooklib>=0.18
+beautifulsoup4>=4.12
+lxml>=5.0
+requests>=2.31
+urllib3>=2.0
+numpy>=1.24
+soundfile>=0.12
+pydub>=0.25
+tqdm>=4.65
+gradio>=4.0
+json-repair>=0.15
+Pillow>=10.0
+
+# Optional: For MOBI support via calibre
+# calibre (install via system package manager)

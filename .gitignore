@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.claude/
+audiobook_output/
+book_tts.egg-info/
+*.epub
+*.mobi
+*.azw*
