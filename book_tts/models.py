@@ -17,6 +17,20 @@ class ParserType(Enum):
 
     EPUB = auto()
     MOBI = auto()
+    MARKDOWN = auto()
+
+
+class BoundaryType(Enum):
+    """Structural boundary between paragraphs for SML token injection.
+
+    ``NONE`` — first paragraph in output, or no boundary.
+    ``PARAGRAPH`` — consecutive paragraph boundary (→ ``[break]``).
+    ``SECTION`` — major section / chapter boundary (→ ``[pause]``).
+    """
+
+    NONE = auto()
+    PARAGRAPH = auto()
+    SECTION = auto()
 
 
 class ConversionStatus(Enum):
@@ -38,6 +52,8 @@ class Chapter:
     """A single chapter extracted from a book.
 
     ``paragraphs`` is a *tuple* to guarantee immutability.
+    ``boundaries`` (optional) maps each paragraph to a :class:`BoundaryType`
+    for downstream SML token injection.  Must match ``paragraphs`` length.
     """
 
     index: int
@@ -45,6 +61,7 @@ class Chapter:
     paragraphs: tuple[str, ...]
     source_file: str = ""
     word_count: int = 0
+    boundaries: tuple[BoundaryType, ...] = ()
 
     def __post_init__(self) -> None:
         # Auto-compute word_count when left at default.

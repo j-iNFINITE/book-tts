@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from dataclasses import dataclass
 
 import gradio as gr
 
 from book_tts.config import DEFAULT_BASE_URL, DEFAULT_VOICE, DEFAULT_STYLE
+
+
+@dataclass
+class TTSSettings:
+    """Typed container for TTS settings components."""
+
+    voice: gr.Dropdown
+    style: gr.Dropdown
+    api_keys: gr.Textbox
+    base_url: gr.Textbox
+
+
+@dataclass
+class ProgressDisplay:
+    """Typed container for progress display components."""
+
+    status_text: gr.Textbox
+    progress_bar: gr.Slider
 
 
 def create_file_upload() -> gr.File:
@@ -18,13 +36,12 @@ def create_file_upload() -> gr.File:
     )
 
 
-def create_tts_settings() -> Dict[str, gr.Component]:
+def create_tts_settings() -> TTSSettings:
     from book_tts.utils.history import load_history
     voices, styles = load_history()
     if DEFAULT_VOICE not in voices:
         voices.insert(0, DEFAULT_VOICE)
     if styles:
-        # Keep existing styles, move DEFAULT_STYLE to front if present.
         if DEFAULT_STYLE in styles:
             styles.remove(DEFAULT_STYLE)
         styles.insert(0, DEFAULT_STYLE)
@@ -55,12 +72,12 @@ def create_tts_settings() -> Dict[str, gr.Component]:
             value=DEFAULT_BASE_URL,
             placeholder="https://api.example.com",
         )
-    return {
-        "voice": voice,
-        "style": style,
-        "api_keys": api_keys,
-        "base_url": base_url,
-    }
+    return TTSSettings(
+        voice=voice,
+        style=style,
+        api_keys=api_keys,
+        base_url=base_url,
+    )
 
 
 def create_chapter_selector() -> gr.CheckboxGroup:
@@ -71,7 +88,7 @@ def create_chapter_selector() -> gr.CheckboxGroup:
     )
 
 
-def create_progress_display() -> Dict[str, gr.Component]:
+def create_progress_display() -> ProgressDisplay:
     status_text = gr.Textbox(
         label="Status",
         value="Ready",
@@ -84,10 +101,10 @@ def create_progress_display() -> Dict[str, gr.Component]:
         value=0,
         interactive=False,
     )
-    return {
-        "status_text": status_text,
-        "progress_bar": progress_bar,
-    }
+    return ProgressDisplay(
+        status_text=status_text,
+        progress_bar=progress_bar,
+    )
 
 
 def create_audio_preview() -> gr.Audio:

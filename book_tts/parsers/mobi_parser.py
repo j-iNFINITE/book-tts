@@ -10,11 +10,10 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from bs4 import BeautifulSoup
 
-from book_tts.models import BookMetadata, Chapter, ParseResult, ParserType
+from book_tts.models import BookMetadata, BoundaryType, Chapter, ParseResult, ParserType
 from book_tts.parsers.base import BaseBookParser
 from book_tts.parsers.epub_parser import EPUBParser
 from book_tts.parsers.text_cleaner import TextCleaner
-from book_tts.tts.sml import intersperse_break_tokens, SML_PAUSE
 
 if TYPE_CHECKING:
     from book_tts.models import ConversionProgress
@@ -148,13 +147,14 @@ class MOBIParser(BaseBookParser):
 
         if not chapters_meta:
             paragraphs = self._html_to_paragraphs(soup)
-            paragraphs = intersperse_break_tokens(paragraphs)
             cleaned = self.cleaner.clean_paragraphs(paragraphs)
+            boundaries = (BoundaryType.NONE,) + (BoundaryType.PARAGRAPH,) * (max(len(cleaned) - 1, 0))
             chapter = Chapter(
                 index=0,
                 title=metadata.title or "Full Text",
                 paragraphs=tuple(cleaned),
                 source_file=html_path.name,
+                boundaries=boundaries,
             )
             return ParseResult(
                 metadata=metadata,
@@ -186,11 +186,9 @@ class MOBIParser(BaseBookParser):
 
             segment_elements = all_elements[start_idx:end_idx]
             paragraphs = self._elements_to_paragraphs(segment_elements)
-            # Prepend [pause] for anchor boundaries (except first).
-            if i > 0 and paragraphs:
-                paragraphs[0] = f"{SML_PAUSE} {paragraphs[0]}"
-            paragraphs = intersperse_break_tokens(paragraphs)
             cleaned = self.cleaner.clean_paragraphs(paragraphs)
+            leading = BoundaryType.SECTION if i > 0 else BoundaryType.NONE
+            boundaries = (leading,) + (BoundaryType.PARAGRAPH,) * (max(len(cleaned) - 1, 0))
 
             if cleaned:
                 chapters.append(
@@ -199,19 +197,21 @@ class MOBIParser(BaseBookParser):
                         title=title,
                         paragraphs=tuple(cleaned),
                         source_file=html_path.name,
+                        boundaries=boundaries,
                     )
                 )
 
         if not chapters:
             paragraphs = self._html_to_paragraphs(soup)
-            paragraphs = intersperse_break_tokens(paragraphs)
             cleaned = self.cleaner.clean_paragraphs(paragraphs)
+            boundaries = (BoundaryType.NONE,) + (BoundaryType.PARAGRAPH,) * (max(len(cleaned) - 1, 0))
             chapters = [
                 Chapter(
                     index=0,
                     title=metadata.title or "Full Text",
                     paragraphs=tuple(cleaned),
                     source_file=html_path.name,
+                    boundaries=boundaries,
                 )
             ]
 

@@ -1,16 +1,15 @@
-"""TTS text normalization and cleaning pipeline."""
+"""TTS text normalization and cleaning pipeline.
+
+Operates on plain text only — no SML awareness.  SML token protection
+and restoration is handled by the TTS layer (:class:`ParagraphSynthesizer`).
+"""
 
 from __future__ import annotations
 
 import re
-from typing import List, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from book_tts.parsers.number_converter import convert_all
+from typing import List
 
 # Bracket removal: each pattern matches a full bracket pair including contents.
-# NOTE: book_tts.tts.sml protect_sml_tokens() must be called *before* this step
-# to shield [break]/[pause] tokens from the square-bracket pattern.
 _BRACKET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"[（）]"),          # Chinese parentheses
     re.compile(r"[《》]"),          # Chinese book title marks
@@ -30,39 +29,27 @@ _SPACE_BETWEEN_CJK_DIGIT = re.compile(r"(?<=[\u4e00-\u9fff])\s+(?=\d)")
 
 
 class TextCleaner:
-    """Clean and normalize text for TTS synthesis.
+    """Clean and normalize plain text for TTS synthesis.
 
     Parameters
     ----------
     language:
         Hint for language-specific cleaning rules.  Accepts ``"zh"``,
         ``"en"`` or ``"auto"`` (default).
-    protect_sml:
-        If True (default), protect SML tokens ([break]/[pause]) from
-        being stripped by bracket removal.  Should only be disabled if
-        the input text is guaranteed not to contain SML tokens.
-    convert_numbers:
-        If True, run the number/symbol-to-Chinese converter after cleaning.
     """
 
-    def __init__(
-        self,
-        language: str = "auto",
-        protect_sml: bool = True,
-        convert_numbers: bool = False,
-    ) -> None:
+    def __init__(self, language: str = "auto") -> None:
         self.language = language
-        self.protect_sml = protect_sml
-        self.convert_numbers = convert_numbers
 
     def clean(self, text: str) -> str:
-        """Run the full cleaning pipeline on *text* and return the result."""
+        """Run the full cleaning pipeline on *text* and return the result.
+
+        *text* must be plain — SML tokens are stripped by bracket removal.
+        Callers with SML-tagged text should run ``protect_sml_tokens()``
+        before calling this method.
+        """
         if not text:
             return ""
-
-        if self.protect_sml:
-            from book_tts.tts.sml import protect_sml_tokens, restore_sml_tokens
-            text = protect_sml_tokens(text)
 
         text = self._remove_brackets(text)
         text = self._normalize_whitespace(text)
@@ -70,25 +57,16 @@ class TextCleaner:
         text = self._clean_chinese(text)
         text = self._clean_english(text)
 
-        if self.protect_sml:
-            text = restore_sml_tokens(text)
-
-        if self.convert_numbers:
-            from book_tts.parsers.number_converter import convert_all as _convert_all
-            text = _convert_all(text)
-
         return text.strip()
 
     def clean_paragraphs(self, paragraphs: List[str]) -> List[str]:
-        """Clean a list of paragraphs, dropping any that become empty."""
-        from book_tts.tts.sml import strip_sml_tokens as _strip
+        """Clean a list of paragraphs, dropping any that become empty or are citations."""
         result: list[str] = []
         for raw in paragraphs:
             cleaned = self.clean(raw)
             if not cleaned:
                 continue
-            # Check citation on text without SML tokens.
-            if self._is_citation(_strip(cleaned)):
+            if self._is_citation(cleaned):
                 continue
             result.append(cleaned)
         return result

@@ -6,11 +6,10 @@ import re
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from book_tts.models import BookMetadata, Chapter, ParseResult, ParserType
+from book_tts.models import BookMetadata, BoundaryType, Chapter, ParseResult, ParserType
 from book_tts.parsers.base import BaseBookParser
 from book_tts.parsers.text_cleaner import TextCleaner
 from book_tts.config import MIN_VISIBLE_CHARS
-from book_tts.tts.sml import intersperse_break_tokens, SML_PAUSE
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
@@ -46,15 +45,15 @@ class MarkdownParser(BaseBookParser):
             metadata=BookMetadata(title=path.stem),
             chapters=tuple(chapters),
             toc=tuple(ch.title for ch in chapters),
-            parser_type=ParserType.EPUB,
+            parser_type=ParserType.MARKDOWN,
         )
 
     def _parse_as_single_chapter(
         self, path: Path, content: str
     ) -> ParseResult:
         paragraphs = self._content_to_paragraphs(content)
-        paragraphs = intersperse_break_tokens(paragraphs)
         cleaned = self.cleaner.clean_paragraphs(paragraphs)
+        boundaries = (BoundaryType.NONE,) + (BoundaryType.PARAGRAPH,) * (max(len(cleaned) - 1, 0))
         if not cleaned:
             cleaned = ["(empty)"]
 
@@ -63,12 +62,13 @@ class MarkdownParser(BaseBookParser):
             title=path.stem,
             paragraphs=tuple(cleaned),
             source_file=path.name,
+            boundaries=boundaries,
         )
         return ParseResult(
             metadata=BookMetadata(title=path.stem),
             chapters=(chapter,),
             toc=(path.stem,),
-            parser_type=ParserType.EPUB,
+            parser_type=ParserType.MARKDOWN,
         )
 
     def _split_at_headings(
@@ -103,11 +103,9 @@ class MarkdownParser(BaseBookParser):
 
             section = content[start:end]
             paragraphs = self._content_to_paragraphs(section)
-            # Insert [pause] at heading boundaries (except first section).
-            if idx > 0 and paragraphs:
-                paragraphs[0] = f"{SML_PAUSE} {paragraphs[0]}"
-            paragraphs = intersperse_break_tokens(paragraphs)
             cleaned = self.cleaner.clean_paragraphs(paragraphs)
+            leading = BoundaryType.SECTION if idx > 0 else BoundaryType.NONE
+            boundaries = (leading,) + (BoundaryType.PARAGRAPH,) * (max(len(cleaned) - 1, 0))
 
             total_chars = sum(len(p) for p in cleaned)
             if total_chars < MIN_VISIBLE_CHARS:
@@ -119,6 +117,7 @@ class MarkdownParser(BaseBookParser):
                     title=title,
                     paragraphs=tuple(cleaned),
                     source_file=f"{book_title}.md",
+                    boundaries=boundaries,
                 )
             )
 

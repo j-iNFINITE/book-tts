@@ -1,7 +1,7 @@
 """Conversion state management for the Gradio GUI.
 
 Thread-safe session state that coordinates parsing, chapter selection,
-TTS synthesis, and audio merging across the GUI lifecycle.
+and delegates conversion to the ConversionPipeline.
 """
 
 from __future__ import annotations
@@ -11,10 +11,8 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-from book_tts.audio.merger import AudioMerger
-from book_tts.config import DEFAULT_OUTPUT_DIR, DEFAULT_VOICE, AUDIO_FORMAT
+from book_tts.config import DEFAULT_OUTPUT_DIR, DEFAULT_VOICE
 from book_tts.models import (
-    ConversionProgress,
     ConversionStatus,
     ParseResult,
     TTSConfig,
@@ -22,10 +20,14 @@ from book_tts.models import (
 from book_tts.parsers.epub_parser import EPUBParser
 from book_tts.parsers.mobi_parser import MOBIParser
 from book_tts.parsers.markdown_parser import MarkdownParser
-from book_tts.parsers.text_cleaner import TextCleaner
-from book_tts.tts.client import MiMoTTSClient
-from book_tts.tts.synthesizer import ParagraphSynthesizer
-from book_tts.utils.file_utils import sanitize_filename
+from book_tts.pipeline import (
+    ConversionPipeline,
+    PipelineConfig,
+    PipelineEvent,
+    CompletedEvent,
+    CancelledEvent,
+    ErrorEvent,
+)
 from book_tts.utils.progress import ProgressTracker
 
 logger = logging.getLogger(__name__)
@@ -34,8 +36,9 @@ logger = logging.getLogger(__name__)
 class ConversionState:
     """Manages a single conversion session with thread-safe state.
 
-    Coordinates the full pipeline: file parsing → chapter selection →
-    TTS synthesis → audio merging, while exposing progress to the GUI.
+    Parsing is handled directly by parser instances held here so the
+    GUI can preview chapters before conversion.  Conversion delegates
+    to :class:`ConversionPipeline`.
     """
 
     def __init__(self) -> None:
@@ -43,13 +46,11 @@ class ConversionState:
         self._parse_result: Optional[ParseResult] = None
         self._selected_chapters: List[int] = []
         self._output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
-        self._is_converting: bool = False
+        self._pipeline: Optional[ConversionPipeline] = None
         self._conversion_thread: Optional[threading.Thread] = None
-        self._progress_tracker: Optional[ProgressTracker] = None
         self._epub_parser = EPUBParser()
         self._mobi_parser = MOBIParser()
         self._md_parser = MarkdownParser()
-        self._cleaner = TextCleaner()
 
     # ── Properties ────────────────────────────────────────────────────────
 
@@ -76,12 +77,16 @@ class ConversionState:
     @property
     def is_converting(self) -> bool:
         with self._lock:
-            return self._is_converting
+            if self._pipeline is not None:
+                return self._pipeline.is_running
+        return False
 
     @property
-    def progress_tracker(self) -> Optional[ProgressTracker]:
+    def chapter_files(self) -> list[Path]:
         with self._lock:
-            return self._progress_tracker
+            if self._pipeline is not None:
+                return self._pipeline.chapter_files
+        return []
 
     # ── Parsing ───────────────────────────────────────────────────────────
 
@@ -129,6 +134,7 @@ class ConversionState:
         style: str = "",
         api_keys: Optional[List[str]] = None,
         base_url: str = "",
+        input_path: Optional[Path] = None,
         output_dir: Optional[Path] = None,
     ) -> None:
         """Start conversion in a background thread.
@@ -136,16 +142,19 @@ class ConversionState:
         Raises RuntimeError if already converting or nothing is parsed.
         """
         with self._lock:
-            if self._is_converting:
+            if self._pipeline is not None and self._pipeline.is_running:
                 raise RuntimeError("Conversion already in progress")
             if self._parse_result is None:
                 raise RuntimeError("No file parsed yet")
             if not self._selected_chapters:
                 raise RuntimeError("No chapters selected")
 
-            self._is_converting = True
             if output_dir is not None:
                 self._output_dir = output_dir
+
+            out_dir = self._output_dir
+            chapters = list(self._selected_chapters)
+            input_p = input_path or Path(".")
 
         keys = tuple(api_keys) if api_keys else ()
         tts_config = TTSConfig(
@@ -155,14 +164,9 @@ class ConversionState:
             base_url=base_url,
         )
 
-        with self._lock:
-            result = self._parse_result
-            chapters = list(self._selected_chapters)
-            out_dir = self._output_dir
-
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
-            args=(tts_config, result, chapters, out_dir),
+            args=(tts_config, input_p, chapters, out_dir),
             daemon=True,
             name="conversion-worker",
         )
@@ -171,104 +175,46 @@ class ConversionState:
     def _run_conversion(
         self,
         tts_config: TTSConfig,
-        parse_result: ParseResult,
+        input_path: Path,
         chapter_indices: List[int],
         output_dir: Path,
     ) -> None:
+        config = PipelineConfig(tts=tts_config, output_dir=output_dir)
         tracker = ProgressTracker(total_chapters=len(chapter_indices))
+        pipeline = ConversionPipeline(config, tracker=tracker)
+
         with self._lock:
-            self._progress_tracker = tracker
+            self._pipeline = pipeline
 
         try:
-            import shutil
-
-            client = MiMoTTSClient(tts_config)
-            synthesizer = ParagraphSynthesizer(
-                tts_client=client,
-                cleaner=self._cleaner,
-                progress_tracker=tracker,
-            )
-            merger = AudioMerger()
-
-            tracker.start()
-
-            # Match CLI directory structure: output_dir/book_name/chapters/
-            book_stem = Path(parse_result.metadata.title or "audiobook").stem
-            book_dir = output_dir / book_stem
-            chapters_dir = book_dir / "chapters"
-            chapters_dir.mkdir(parents=True, exist_ok=True)
-
-            chapter_audio_files: list[Path] = []
-
-            for chapter_pos, chapter_idx in enumerate(chapter_indices):
-                if tracker.is_cancelled:
-                    break
-
-                chapter = parse_result.chapters[chapter_idx]
-                ch_title = chapter.title
-                safe_name = sanitize_filename(ch_title) or f"chapter_{chapter_idx:04d}"
-                chapter_output = chapters_dir / f"{chapter_idx:04d}_{safe_name}.{AUDIO_FORMAT}"
-
-                tracker.update_chapter(
-                    chapter_pos,
-                    len(chapter_indices),
-                    message=f"Synthesizing chapter {chapter_pos + 1}/{len(chapter_indices)}: {ch_title}",
-                )
-
-                para_dir = chapters_dir / f"_para_{chapter_idx:04d}"
-                para_dir.mkdir(parents=True, exist_ok=True)
-
-                para_files = synthesizer.synthesize_chapter(
-                    paragraphs=list(chapter.paragraphs),
-                    output_dir=para_dir,
-                    chapter_index=chapter_idx,
-                    total_chapters=len(chapter_indices),
-                )
-
-                if tracker.is_cancelled:
-                    break
-
-                if para_files:
-                    merged = merger.merge_to_chapter(para_files, chapter_output)
-                    if merged:
-                        chapter_audio_files.append(merged)
-                        tracker.add_chapter_file(merged)
-
-                shutil.rmtree(para_dir, ignore_errors=True)
-
-            if chapter_audio_files and not tracker.is_cancelled:
-                tracker.finish(ConversionStatus.COMPLETED)
-            elif tracker.is_cancelled:
-                tracker.finish(ConversionStatus.CANCELLED)
-            else:
-                tracker.finish(ConversionStatus.COMPLETED)
-
+            for _event in pipeline.convert(input_path, chapter_indices):
+                pass  # Progress is driven through the shared ProgressTracker
         except Exception as exc:
             logger.error("Conversion failed: %s", exc, exc_info=True)
             tracker.set_error(str(exc))
-        finally:
-            with self._lock:
-                self._is_converting = False
 
     def cancel(self) -> None:
         with self._lock:
-            if self._progress_tracker is not None:
-                self._progress_tracker.request_cancel()
+            if self._pipeline is not None:
+                self._pipeline.cancel()
                 logger.info("Cancellation requested")
 
-    def get_progress(self) -> ConversionProgress:
+    def get_progress(self):
+        """Return the current progress snapshot for GUI polling."""
+        from book_tts.models import ConversionProgress
+
         with self._lock:
-            if self._progress_tracker is not None:
-                return self._progress_tracker.snapshot
+            if self._pipeline is not None:
+                return self._pipeline.progress
         return ConversionProgress(status=ConversionStatus.IDLE)
 
     # ── Reset ─────────────────────────────────────────────────────────────
 
     def reset(self) -> None:
         with self._lock:
-            if self._is_converting:
-                self.cancel()
+            if self._pipeline is not None and self._pipeline.is_running:
+                self._pipeline.cancel()
             self._parse_result = None
             self._selected_chapters = []
-            self._progress_tracker = None
+            self._pipeline = None
             logger.info("State reset")

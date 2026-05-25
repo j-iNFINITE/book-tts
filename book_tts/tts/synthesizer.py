@@ -60,8 +60,13 @@ class ParagraphSynthesizer:
 
         Returns list of generated audio file paths, sorted by index.
         """
-        cleaned = self._cleaner.clean_paragraphs(paragraphs)
-        if not cleaned:
+        # Guard SML tokens from bracket removal during cleaning.
+        from book_tts.tts.sml import protect_sml_tokens, restore_sml_tokens
+
+        guarded = [protect_sml_tokens(p) for p in paragraphs]
+        cleaned = self._cleaner.clean_paragraphs(guarded)
+        restored = [restore_sml_tokens(p) for p in cleaned]
+        if not restored:
             logger.warning("Chapter %d has no text after cleaning", chapter_index)
             return []
 
@@ -76,7 +81,7 @@ class ParagraphSynthesizer:
         results: dict[int, list[Path]] = {}
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = {}
-            for i, para in enumerate(cleaned):
+            for i, para in enumerate(restored):
                 if self._tracker.is_cancelled:
                     logger.info("Cancellation requested, stopping synthesis")
                     return []

@@ -15,6 +15,7 @@ from book_tts.parsers.base import BaseBookParser
 from book_tts.parsers.text_cleaner import TextCleaner
 from book_tts.models import (
     BookMetadata,
+    BoundaryType,
     Chapter,
     ConversionProgress,
     ConversionStatus,
@@ -22,7 +23,6 @@ from book_tts.models import (
     ParserType,
 )
 from book_tts.config import SKIP_GUIDE_TYPES, SKIP_NAME_KEYWORDS, MIN_VISIBLE_CHARS
-from book_tts.tts.sml import intersperse_break_tokens, SML_PAUSE
 
 logger = logging.getLogger(__name__)
 
@@ -437,21 +437,22 @@ class EPUBParser(BaseBookParser):
                                 wrapper.append(kid)
 
                         paragraphs = self._extract_paragraphs_from_root(wrapper)
-                        paragraphs = intersperse_break_tokens(paragraphs)
                         paragraphs = self._merge_broken_paragraphs(paragraphs)
+                        boundaries = (BoundaryType.NONE,) + (BoundaryType.PARAGRAPH,) * (max(len(paragraphs) - 1, 0))
 
                         chapters.append(Chapter(
                             index=chapter_index,
                             title=nav_entry["title"],
                             paragraphs=tuple(paragraphs),
                             source_file=item_name,
+                            boundaries=boundaries,
                         ))
                         chapter_index += 1
                 else:
                     # Nav entries without anchors -> use whole file
                     paragraphs = self._extract_paragraphs_from_root(content_root)
-                    paragraphs = intersperse_break_tokens(paragraphs)
                     paragraphs = self._merge_broken_paragraphs(paragraphs)
+                    boundaries = (BoundaryType.NONE,) + (BoundaryType.PARAGRAPH,) * (max(len(paragraphs) - 1, 0))
 
                     chapters.append(
                         Chapter(
@@ -459,31 +460,30 @@ class EPUBParser(BaseBookParser):
                             title=nav_entries[0]["title"],
                             paragraphs=tuple(paragraphs),
                             source_file=item_name,
+                            boundaries=boundaries,
                         )
                     )
                     chapter_index += 1
             else:
                 # No nav entry -> continuation content, append to last chapter
                 paragraphs = self._extract_paragraphs_from_root(content_root)
-                # Intersperse breaks BEFORE merging so [break] boundaries prevent
-                # merge of short sub-headings with body text.
-                paragraphs = intersperse_break_tokens(paragraphs)
                 paragraphs = self._merge_broken_paragraphs(paragraphs)
                 total_chars = sum(len(p) for p in paragraphs)
                 if total_chars < MIN_VISIBLE_CHARS:
                     continue
 
                 if chapters:
-                    # Merge into previous chapter with a [pause] separator.
+                    # Merge into previous chapter with a section boundary.
                     last = chapters[-1]
-                    if paragraphs:
-                        paragraphs[0] = f"{SML_PAUSE} {paragraphs[0]}"
+                    new_boundaries = (BoundaryType.SECTION,) + (BoundaryType.PARAGRAPH,) * (max(len(paragraphs) - 1, 0))
                     merged_paras = list(last.paragraphs) + paragraphs
+                    merged_boundaries = last.boundaries + new_boundaries if last.boundaries else new_boundaries
                     chapters[-1] = Chapter(
                         index=last.index,
                         title=last.title,
                         paragraphs=tuple(merged_paras),
                         source_file=last.source_file,
+                        boundaries=merged_boundaries,
                     )
                 else:
                     # No previous chapter -> create one with filename title
@@ -491,12 +491,14 @@ class EPUBParser(BaseBookParser):
                     title = (
                         stem.replace("_", " ").replace("-", " ").title()
                     )
+                    boundaries = (BoundaryType.NONE,) + (BoundaryType.PARAGRAPH,) * (max(len(paragraphs) - 1, 0))
                     chapters.append(
                         Chapter(
                             index=chapter_index,
                             title=title,
                             paragraphs=tuple(paragraphs),
                             source_file=item_name,
+                            boundaries=boundaries,
                         )
                     )
                     chapter_index += 1
@@ -508,6 +510,7 @@ class EPUBParser(BaseBookParser):
                 title=ch.title,
                 paragraphs=ch.paragraphs,
                 source_file=ch.source_file,
+                boundaries=ch.boundaries,
             )
             for i, ch in enumerate(chapters)
         ]
@@ -543,13 +546,6 @@ class EPUBParser(BaseBookParser):
 
             if merged:
                 prev = merged[-1]
-                # Never merge across [break] / [pause] boundaries.
-                if prev.endswith("[break]") or prev.endswith("[pause]"):
-                    merged.append(para)
-                    continue
-                if para.startswith("[break]") or para.startswith("[pause]"):
-                    merged.append(para)
-                    continue
 
                 prev_ends_sentence = prev and prev[-1] in SENTENCE_END
                 has_internal_punct = any(c in INTERNAL_PUNCT for c in prev)

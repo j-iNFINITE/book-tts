@@ -10,6 +10,8 @@ import gradio as gr
 
 from book_tts.config import DEFAULT_OUTPUT_DIR, DEFAULT_VOICE, DEFAULT_STYLE
 from book_tts.gui.components import (
+    ProgressDisplay,
+    TTSSettings,
     create_audio_preview,
     create_chapter_selector,
     create_file_upload,
@@ -18,10 +20,13 @@ from book_tts.gui.components import (
 )
 from book_tts.gui.state import ConversionState
 from book_tts.models import ConversionStatus
-from book_tts.tts.synthesizer import ParagraphSynthesizer
-from book_tts.tts.sml import strip_sml_tokens
-from book_tts.parsers.text_cleaner import TextCleaner
-from book_tts.utils.file_utils import sanitize_filename
+from book_tts.pipeline import (
+    ConversionPipeline,
+    PipelineConfig,
+    TTSConfig,
+    ChapterDoneEvent,
+    ErrorEvent,
+)
 from book_tts.utils.history import record as history_record, load_history
 
 POLL_INTERVAL = 0.5
@@ -131,14 +136,11 @@ def create_app() -> gr.Blocks:
                 return "", "**Error:** No chapters selected."
 
             out_dir = Path(output_dir) if output_dir else Path(DEFAULT_OUTPUT_DIR)
-            cleaner = TextCleaner()
             summary_lines: list[str] = []
-            total_chunks = 0
-            total_chars = 0
+            total_result: Optional[str] = None
 
             for fpath in file_paths:
                 fname = Path(fpath).name
-                # Group selected chapters for this file
                 file_indices: list[int] = []
                 for val in chapter_values:
                     if val.startswith(f"[{fname}]"):
@@ -151,50 +153,29 @@ def create_app() -> gr.Blocks:
                 if not file_indices:
                     continue
 
-                result = state.parse_file(fpath)
-                book_stem = Path(fname).stem
-                dry_dir = out_dir / book_stem / "_dry_text"
-                dry_dir.mkdir(parents=True, exist_ok=True)
+                config = PipelineConfig(tts=TTSConfig(), output_dir=out_dir)
+                pipeline = ConversionPipeline(config)
 
-                file_chunks = 0
-                file_chars = 0
-                for ch_idx in file_indices:
-                    ch = result.chapters[ch_idx]
-                    safe_name = sanitize_filename(ch.title) or f"chapter_{ch_idx:04d}"
-                    out_path = dry_dir / f"{ch_idx:04d}_{safe_name}.txt"
+                for event in pipeline.dry_run(Path(fpath), file_indices):
+                    if isinstance(event, ChapterDoneEvent):
+                        summary_lines.append(f"**{fname}**: {event.title} → `{event.path}`")
+                    elif isinstance(event, ErrorEvent):
+                        summary_lines.append(f"**{fname}**: Error - {event.error}")
+                        break
 
-                    lines = [f"# {ch.title}", f"# Paragraphs: {len(ch.paragraphs)}", ""]
-                    for para in ch.paragraphs:
-                        cleaned = cleaner.clean(para)
-                        if not cleaned.strip():
-                            continue
-                        chunks = ParagraphSynthesizer._split_text_multi_pass(cleaned)
-                        for chunk in chunks:
-                            tts_text = strip_sml_tokens(chunk).strip()
-                            if tts_text:
-                                lines.append(tts_text.replace("\n", " "))
-                                file_chunks += 1
-                                file_chars += len(tts_text)
-                    out_path.write_text("\n".join(lines), encoding="utf-8")
-
-                total_chunks += file_chunks
-                total_chars += file_chars
-                summary_lines.append(
-                    f"**{fname}**: {file_chunks} TTS chunks ({file_chars} chars) → `{dry_dir}`"
-                )
+                total_result = fname
 
             info = (
-                f"### Dry Run Complete\n"
+                "### Dry Run Complete\n"
                 + "\n".join(summary_lines)
-                + f"\n\n**Total**: {total_chunks} chunks, {total_chars} chars"
             )
-            status = f"Dry run done. {total_chunks} chunks written."
+            status = f"Dry run done: {total_result or 'no files'}"
             return status, info
 
         dry_run_btn.click(
             fn=handle_dry_run,
             inputs=[file_upload, chapter_selector, output_dir_input],
-            outputs=[progress_display["status_text"], dry_run_info],
+            outputs=[progress_display.status_text, dry_run_info],
         )
 
         # ── Convert handler ───────────────────────────────────────────
@@ -208,15 +189,14 @@ def create_app() -> gr.Blocks:
             base_url: str,
             output_dir: str,
         ) -> Generator:
-            # Record new voice/style values for future dropdown suggestions.
             if voice and voice.strip():
                 history_record(voice=voice.strip(), style=(style or "").strip())
 
             if not file_paths:
                 gr.Warning("No file uploaded.")
                 yield {
-                    progress_display["status_text"]: "Error: No file uploaded",
-                    progress_display["progress_bar"]: 0,
+                    progress_display.status_text: "Error: No file uploaded",
+                    progress_display.progress_bar: 0,
                 }
                 return
 
@@ -226,8 +206,8 @@ def create_app() -> gr.Blocks:
             if not api_keys:
                 gr.Warning("Please enter at least one API key.")
                 yield {
-                    progress_display["status_text"]: "Error: No API keys provided",
-                    progress_display["progress_bar"]: 0,
+                    progress_display.status_text: "Error: No API keys provided",
+                    progress_display.progress_bar: 0,
                 }
                 return
 
@@ -235,11 +215,10 @@ def create_app() -> gr.Blocks:
             file_chapters: dict[str, list[int]] = {}
             for val in chapter_values:
                 try:
-                    # Format: [filename] idx: title (chars)
                     if val.startswith("["):
                         fname_end = val.index("]")
                         fname = val[1:fname_end]
-                        idx = int(val[fname_end+2:].split(":")[0])
+                        idx = int(val[fname_end + 2:].split(":")[0])
                         file_chapters.setdefault(fname, []).append(idx)
                 except (ValueError, IndexError):
                     continue
@@ -247,8 +226,8 @@ def create_app() -> gr.Blocks:
             if not file_chapters:
                 gr.Warning("Please select at least one chapter.")
                 yield {
-                    progress_display["status_text"]: "Error: No chapters selected",
-                    progress_display["progress_bar"]: 0,
+                    progress_display.status_text: "Error: No chapters selected",
+                    progress_display.progress_bar: 0,
                 }
                 return
 
@@ -265,8 +244,8 @@ def create_app() -> gr.Blocks:
                 chapter_indices = file_chapters[fname]
 
                 yield {
-                    progress_display["status_text"]: f"Processing file {completed}/{total_files}: {fname}",
-                    progress_display["progress_bar"]: 0,
+                    progress_display.status_text: f"Processing file {completed}/{total_files}: {fname}",
+                    progress_display.progress_bar: 0,
                 }
 
                 try:
@@ -277,6 +256,7 @@ def create_app() -> gr.Blocks:
                         style=style or DEFAULT_STYLE,
                         api_keys=api_keys,
                         base_url=base_url,
+                        input_path=Path(fpath),
                         output_dir=out_dir,
                     )
                 except Exception as exc:
@@ -286,8 +266,8 @@ def create_app() -> gr.Blocks:
                 yield from _stream_progress(state, progress_display, audio_preview)
 
             yield {
-                progress_display["status_text"]: f"All {total_files} files completed",
-                progress_display["progress_bar"]: 100,
+                progress_display.status_text: f"All {total_files} files completed",
+                progress_display.progress_bar: 100,
             }
 
         def update_stop_state() -> dict:
@@ -310,8 +290,8 @@ def create_app() -> gr.Blocks:
                 styles.remove(DEFAULT_STYLE)
             styles.insert(0, DEFAULT_STYLE)
             return {
-                tts_settings["voice"]: gr.update(choices=voices),
-                tts_settings["style"]: gr.update(choices=styles),
+                tts_settings.voice: gr.update(choices=voices),
+                tts_settings.style: gr.update(choices=styles),
             }
 
         convert_btn.click(
@@ -324,15 +304,15 @@ def create_app() -> gr.Blocks:
             inputs=[
                 file_upload,
                 chapter_selector,
-                tts_settings["voice"],
-                tts_settings["style"],
-                tts_settings["api_keys"],
-                tts_settings["base_url"],
+                tts_settings.voice,
+                tts_settings.style,
+                tts_settings.api_keys,
+                tts_settings.base_url,
                 output_dir_input,
             ],
             outputs=[
-                progress_display["status_text"],
-                progress_display["progress_bar"],
+                progress_display.status_text,
+                progress_display.progress_bar,
                 audio_preview,
             ],
         ).then(
@@ -343,7 +323,7 @@ def create_app() -> gr.Blocks:
         ).then(
             fn=refresh_settings_choices,
             inputs=[],
-            outputs=[tts_settings["voice"], tts_settings["style"]],
+            outputs=[tts_settings.voice, tts_settings.style],
             queue=False,
         )
 
@@ -356,7 +336,7 @@ def create_app() -> gr.Blocks:
         stop_btn.click(
             fn=handle_stop,
             inputs=[],
-            outputs=[progress_display["status_text"]],
+            outputs=[progress_display.status_text],
         )
 
     return app
@@ -364,7 +344,7 @@ def create_app() -> gr.Blocks:
 
 def _stream_progress(
     state: ConversionState,
-    progress_display: dict,
+    progress_display: ProgressDisplay,
     audio_preview: gr.Audio,
 ) -> Generator:
     while state.is_converting:
@@ -373,8 +353,8 @@ def _stream_progress(
         status = _format_status(progress)
 
         yield {
-            progress_display["status_text"]: status,
-            progress_display["progress_bar"]: pct,
+            progress_display.status_text: status,
+            progress_display.progress_bar: pct,
         }
         time.sleep(POLL_INTERVAL)
 
@@ -385,8 +365,8 @@ def _stream_progress(
     audio_path = _find_audiobook(final)
 
     yield {
-        progress_display["status_text"]: status,
-        progress_display["progress_bar"]: pct,
+        progress_display.status_text: status,
+        progress_display.progress_bar: pct,
         audio_preview: audio_path,
     }
 
