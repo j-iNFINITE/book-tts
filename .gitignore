@@ -1,8 +1,14 @@
 __pycache__/
 *.pyc
 .claude/
+.agents/
+.venv/
 audiobook_output/
 book_tts.egg-info/
+build/
+dist/
 *.epub
 *.mobi
 *.azw*
+*.zip
+skills-lock.json
