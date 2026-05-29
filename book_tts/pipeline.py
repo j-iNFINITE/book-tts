@@ -484,7 +484,7 @@ class ConversionPipeline:
         return parser.parse(input_path)
 
     def _prepare_dirs(self, input_path: Path, subdir: str = "chapters") -> tuple[Path, Path]:
-        book_stem = input_path.stem
+        book_stem = sanitize_filename(input_path.stem)
         book_dir = self._config.output_dir / book_stem
         sub_dir = book_dir / subdir
         sub_dir.mkdir(parents=True, exist_ok=True)
