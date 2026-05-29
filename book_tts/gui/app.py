@@ -418,7 +418,7 @@ def create_app() -> gr.Blocks:
             }
 
         def refresh_settings_choices() -> dict:
-            voices, styles = load_history()
+            voices, styles, api_keys_list, base_url_hist = load_history()
             if DEFAULT_VOICE not in voices:
                 voices.insert(0, DEFAULT_VOICE)
             if DEFAULT_STYLE in styles:
@@ -427,6 +427,8 @@ def create_app() -> gr.Blocks:
             return {
                 tts_settings.voice: gr.update(choices=voices),
                 tts_settings.style: gr.update(choices=styles),
+                tts_settings.api_keys: gr.update(value="\n".join(api_keys_list) if api_keys_list else ""),
+                tts_settings.base_url: gr.update(value=base_url_hist if base_url_hist else DEFAULT_BASE_URL),
             }
 
         def handle_completion_summary() -> dict:
@@ -482,7 +484,7 @@ def create_app() -> gr.Blocks:
         ).then(
             fn=refresh_settings_choices,
             inputs=[],
-            outputs=[tts_settings.voice, tts_settings.style],
+            outputs=[tts_settings.voice, tts_settings.style, tts_settings.api_keys, tts_settings.base_url],
             queue=False,
         ).then(
             fn=handle_completion_summary,
