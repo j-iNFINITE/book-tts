@@ -38,7 +38,7 @@ class ProgressDisplay:
 
 def create_file_upload() -> gr.File:
     return gr.File(
-        label="Upload Ebook(s)",
+        label="上传电子书",
         file_types=[".epub", ".mobi", ".azw", ".azw3", ".md", ".markdown"],
         type="filepath",
         file_count="multiple",
@@ -61,27 +61,27 @@ def create_tts_settings() -> TTSSettings:
     base_url_value = base_url_hist if base_url_hist else DEFAULT_BASE_URL
 
     with gr.Group():
-        gr.Markdown("### TTS Settings")
+        gr.Markdown("### TTS 设置")
         voice = gr.Dropdown(
-            label="Voice",
+            label="音色",
             choices=voices,
             value=DEFAULT_VOICE,
             allow_custom_value=True,
         )
         style = gr.Dropdown(
-            label="Style",
+            label="风格",
             choices=styles,
             value=DEFAULT_STYLE,
             allow_custom_value=True,
         )
         api_keys = gr.Textbox(
-            label="API Keys (one per line)",
+            label="API Keys（每行一个）",
             value=api_keys_value,
             lines=3,
-            placeholder="Enter your API keys, one per line",
+            placeholder="输入 API Key，每行一个",
         )
         base_url = gr.Textbox(
-            label="API Base URL",
+            label="API 地址",
             value=base_url_value,
             placeholder="https://api.example.com",
         )
@@ -95,7 +95,7 @@ def create_tts_settings() -> TTSSettings:
 
 def create_chapter_selector() -> gr.CheckboxGroup:
     return gr.CheckboxGroup(
-        label="Chapters",
+        label="章节",
         choices=[],
         value=[],
     )
@@ -103,19 +103,19 @@ def create_chapter_selector() -> gr.CheckboxGroup:
 
 def create_chapter_preview() -> gr.Markdown:
     return gr.Markdown(
-        value="Select a chapter to preview",
-        label="Chapter Preview",
+        value="选择章节查看提取的文本",
+        label="章节预览",
     )
 
 
 def create_progress_display() -> ProgressDisplay:
     status_text = gr.Textbox(
-        label="Status",
-        value="Ready",
+        label="状态",
+        value="就绪",
         interactive=False,
     )
     progress_bar = gr.Slider(
-        label="Progress",
+        label="进度",
         minimum=0,
         maximum=100,
         value=0,
@@ -136,7 +136,7 @@ def create_checkpoint_status() -> gr.Markdown:
 
 def create_retry_button() -> gr.Button:
     return gr.Button(
-        "Retry Failed",
+        "重试失败章节",
         variant="secondary",
         interactive=False,
     )
@@ -160,12 +160,12 @@ class CostEstimator:
 
 def create_cost_estimator() -> CostEstimator:
     with gr.Group():
-        gr.Markdown("### Cost Estimator")
+        gr.Markdown("### 费用估算")
         price_input = gr.Textbox(
-            label="Price per 1M tokens (¥)",
+            label="每百万 token 单价（¥）",
             value="0.15",
         )
-        estimate_btn = gr.Button("Estimate Cost", variant="secondary")
+        estimate_btn = gr.Button("估算费用", variant="secondary")
         cost_display = gr.Markdown(value="")
     return CostEstimator(
         price_input=price_input,
@@ -176,13 +176,13 @@ def create_cost_estimator() -> CostEstimator:
 
 def create_voice_preview() -> VoicePreview:
     with gr.Group():
-        gr.Markdown("### Voice Preview")
+        gr.Markdown("### 语音试听")
         preview_text = gr.Textbox(
-            label="Preview Text",
+            label="试听文本",
             value="你好，这是一段语音测试。",
         )
-        test_btn = gr.Button("Test Voice", variant="secondary")
-        preview_audio = gr.Audio(label="Preview Audio", interactive=False)
+        test_btn = gr.Button("试听", variant="secondary")
+        preview_audio = gr.Audio(label="预览音频", interactive=False)
     return VoicePreview(
         preview_text=preview_text,
         test_btn=test_btn,

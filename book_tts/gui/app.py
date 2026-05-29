@@ -41,16 +41,16 @@ def create_app() -> gr.Blocks:
     state = ConversionState()
 
     with gr.Blocks(
-        title="Book TTS - Ebook to Audiobook",
+        title="Book TTS - 电子书转有声书",
     ) as app:
-        gr.Markdown("# Book TTS\nConvert ebooks to audiobooks using TTS synthesis.")
+        gr.Markdown("# Book TTS\n将电子书转换为有声书")
 
         with gr.Row():
             with gr.Column(scale=1):
                 file_upload = create_file_upload()
                 tts_settings = create_tts_settings()
                 voice_preview = create_voice_preview()
-                parse_btn = gr.Button("Parse Ebook", variant="secondary")
+                parse_btn = gr.Button("解析电子书", variant="secondary")
                 chapter_selector = create_chapter_selector()
                 chapter_preview = create_chapter_preview()
                 book_info = gr.Markdown("")
@@ -59,13 +59,13 @@ def create_app() -> gr.Blocks:
             with gr.Column(scale=1):
                 with gr.Row():
                     convert_btn = gr.Button(
-                        "Start Conversion", variant="primary", interactive=False
+                        "开始转换", variant="primary", interactive=False
                     )
                     stop_btn = gr.Button(
-                        "Stop", variant="stop", interactive=False
+                        "停止", variant="stop", interactive=False
                     )
                     dry_run_btn = gr.Button(
-                        "Dry Run Preview", variant="secondary", interactive=False
+                        "预览文本", variant="secondary", interactive=False
                     )
                     retry_btn = create_retry_button()
                 progress_display = create_progress_display()
@@ -73,7 +73,7 @@ def create_app() -> gr.Blocks:
                 dry_run_info = gr.Markdown("")
                 checkpoint_status = create_checkpoint_status()
                 output_dir_input = gr.Textbox(
-                    label="Output Directory",
+                    label="输出目录",
                     value=str(DEFAULT_OUTPUT_DIR),
                 )
 
@@ -81,7 +81,7 @@ def create_app() -> gr.Blocks:
 
         def handle_voice_preview(preview_text, voice, style, api_keys_str, base_url):
             if not preview_text.strip():
-                gr.Warning("Please enter text to preview")
+                gr.Warning("请输入试听文本")
                 return None
 
             api_keys = [k.strip() for k in api_keys_str.strip().split("\n") if k.strip()]
@@ -110,7 +110,7 @@ def create_app() -> gr.Blocks:
                     f.write(audio_bytes)
                     return f.name
             except Exception as exc:
-                gr.Warning(f"Voice preview failed: {exc}")
+                gr.Warning(f"语音试听失败: {exc}")
                 return None
 
         voice_preview.test_btn.click(
@@ -129,12 +129,12 @@ def create_app() -> gr.Blocks:
 
         def handle_parse(file_paths: Optional[List[str]]) -> tuple:
             if not file_paths:
-                gr.Warning("Please upload file(s) first.")
+                gr.Warning("请先上传文件")
                 return (
                     gr.update(choices=[], value=[]),
                     gr.update(interactive=False),
                     gr.update(interactive=False),
-                    "No file uploaded.",
+                    "未上传文件",
                     gr.update(value="", visible=False),
                 )
 
@@ -148,32 +148,32 @@ def create_app() -> gr.Blocks:
                     result = state.parse_file(fpath)
                     fname = Path(fpath).name
                     for ch in result.chapters:
-                        label = f"[{fname}] {ch.index}: {ch.title} ({ch.word_count} chars)"
+                        label = f"[{fname}] {ch.index}: {ch.title} ({ch.word_count} 字)"
                         all_choices.append(label)
                     meta = result.metadata
-                    info = f"**{fname}**: {len(result.chapters)} chapters"
+                    info = f"**{fname}**: {len(result.chapters)} 章"
                     if meta.author:
-                        info += f" by {meta.author}"
+                        info += f" - {meta.author}"
                     all_info.append(info)
 
                     ckpt = state.checkpoint_summary
                     if ckpt:
                         checkpoint_messages.append(
-                            f"**{fname}**: Found checkpoint — "
-                            f"{ckpt['completed_count']}/{len(result.chapters)} chapters completed"
+                            f"**{fname}**: 发现断点 — "
+                            f"已完成 {ckpt['completed_count']}/{len(result.chapters)} 章"
                         )
                 except Exception as exc:
                     errors.append(f"{Path(fpath).name}: {exc}")
 
             if errors:
-                gr.Warning(f"Some files failed: {'; '.join(errors)}")
+                gr.Warning(f"部分文件解析失败: {'; '.join(errors)}")
 
             if not all_choices:
                 return (
                     gr.update(choices=[], value=[]),
                     gr.update(interactive=False),
                     gr.update(interactive=False),
-                    "No chapters found.",
+                    "未找到章节",
                     gr.update(value="", visible=False),
                 )
 
@@ -202,9 +202,9 @@ def create_app() -> gr.Blocks:
             output_dir: str,
         ) -> tuple[str, str]:
             if not file_paths:
-                return "", "**Error:** No file uploaded."
+                return "", "**错误：** 未上传文件"
             if not chapter_values:
-                return "", "**Error:** No chapters selected."
+                return "", "**错误：** 未选择章节"
 
             out_dir = Path(output_dir) if output_dir else Path(DEFAULT_OUTPUT_DIR)
             summary_lines: list[str] = []
@@ -231,16 +231,16 @@ def create_app() -> gr.Blocks:
                     if isinstance(event, ChapterDoneEvent):
                         summary_lines.append(f"**{fname}**: {event.title} → `{event.path}`")
                     elif isinstance(event, ErrorEvent):
-                        summary_lines.append(f"**{fname}**: Error - {event.error}")
+                        summary_lines.append(f"**{fname}**: 错误 - {event.error}")
                         break
 
                 total_result = fname
 
             info = (
-                "### Dry Run Complete\n"
+                "### 预览完成\n"
                 + "\n".join(summary_lines)
             )
-            status = f"Dry run done: {total_result or 'no files'}"
+            status = f"预览完成: {total_result or '无文件'}"
             return status, info
 
         dry_run_btn.click(
@@ -253,15 +253,15 @@ def create_app() -> gr.Blocks:
 
         def handle_cost_estimate(chapter_values, price_per_million):
             if not chapter_values:
-                return "Select chapters to estimate cost"
+                return "选择章节以估算费用"
             try:
                 price = float(price_per_million)
             except ValueError:
-                return "Invalid price"
+                return "价格无效"
 
             parse_result = state.parse_result
             if parse_result is None:
-                return "No book parsed"
+                return "未解析书籍"
 
             total_chars = 0
             for val in chapter_values:
@@ -277,10 +277,10 @@ def create_app() -> gr.Blocks:
             cost = (total_tokens / 1_000_000) * price
 
             return (
-                f"### Cost Estimation\n"
-                f"- **Characters**: {total_chars:,}\n"
-                f"- **Estimated tokens**: {total_tokens:,} (1.5 tokens/char)\n"
-                f"- **Estimated cost**: ¥{cost:.2f}"
+                f"### 费用估算\n"
+                f"- **字符数**: {total_chars:,}\n"
+                f"- **预估 token 数**: {total_tokens:,}（1.5 token/字）\n"
+                f"- **预估费用**: ¥{cost:.2f}"
             )
 
         cost_estimator.estimate_btn.click(
@@ -307,9 +307,9 @@ def create_app() -> gr.Blocks:
                 )
 
             if not file_paths:
-                gr.Warning("No file uploaded.")
+                gr.Warning("未上传文件")
                 yield {
-                    progress_display.status_text: "Error: No file uploaded",
+                    progress_display.status_text: "错误: 未上传文件",
                     progress_display.progress_bar: 0,
                 }
                 return
@@ -318,9 +318,9 @@ def create_app() -> gr.Blocks:
                 k.strip() for k in api_keys_str.strip().split("\n") if k.strip()
             ]
             if not api_keys:
-                gr.Warning("Please enter at least one API key.")
+                gr.Warning("请输入至少一个 API Key")
                 yield {
-                    progress_display.status_text: "Error: No API keys provided",
+                    progress_display.status_text: "错误: 未提供 API Key",
                     progress_display.progress_bar: 0,
                 }
                 return
@@ -340,9 +340,9 @@ def create_app() -> gr.Blocks:
                     continue
 
             if not file_chapters:
-                gr.Warning("Please select at least one chapter.")
+                gr.Warning("请至少选择一个章节")
                 yield {
-                    progress_display.status_text: "Error: No chapters selected",
+                    progress_display.status_text: "错误: 未选择章节",
                     progress_display.progress_bar: 0,
                 }
                 return
@@ -360,7 +360,7 @@ def create_app() -> gr.Blocks:
                 chapter_indices = file_chapters[fname]
 
                 yield {
-                    progress_display.status_text: f"Processing file {completed}/{total_files}: {fname}",
+                    progress_display.status_text: f"处理文件 {completed}/{total_files}: {fname}",
                     progress_display.progress_bar: 0,
                 }
 
@@ -377,13 +377,13 @@ def create_app() -> gr.Blocks:
                         resume=True,
                     )
                 except Exception as exc:
-                    gr.Warning(f"Failed to process {fname}: {exc}")
+                    gr.Warning(f"处理 {fname} 失败: {exc}")
                     continue
 
                 yield from _stream_progress(state, progress_display)
 
             yield {
-                progress_display.status_text: f"All {total_files} files completed",
+                progress_display.status_text: f"全部 {total_files} 个文件处理完成",
                 progress_display.progress_bar: 100,
             }
 
@@ -445,10 +445,10 @@ def create_app() -> gr.Blocks:
 
             size_mb = total_size / (1024 * 1024)
 
-            summary = f"""### Conversion Complete
-- **Time**: {elapsed:.0f}s
-- **Chapters**: {chapter_count}
-- **Total size**: {size_mb:.1f} MB"""
+            summary = f"""### 转换完成
+- **耗时**: {elapsed:.0f} 秒
+- **章节数**: {chapter_count}
+- **文件大小**: {size_mb:.1f} MB"""
 
             return {completion_summary: gr.update(value=summary, visible=True)}
 
@@ -495,7 +495,7 @@ def create_app() -> gr.Blocks:
 
         def handle_stop() -> str:
             state.cancel()
-            return "Cancelling..."
+            return "正在取消..."
 
         stop_btn.click(
             fn=handle_stop,
@@ -516,18 +516,18 @@ def create_app() -> gr.Blocks:
         ) -> Generator:
             failed = state.failed_chapters
             if not failed:
-                gr.Warning("No failed chapters to retry")
+                gr.Warning("没有失败章节需要重试")
                 yield {
-                    progress_display.status_text: "No failed chapters to retry",
+                    progress_display.status_text: "没有失败章节",
                     retry_btn: gr.update(interactive=False),
                 }
                 return
 
             failed_values = [v for v in chapter_values if _get_chapter_idx(v) in failed]
             if not failed_values:
-                gr.Warning("No failed chapters found in selection")
+                gr.Warning("选中章节中无失败章节")
                 yield {
-                    progress_display.status_text: "No failed chapters in selection",
+                    progress_display.status_text: "选中章节中无失败章节",
                     retry_btn: gr.update(interactive=False),
                 }
                 return
@@ -594,7 +594,7 @@ def create_app() -> gr.Blocks:
 
         def handle_chapter_preview(chapter_values: list[str]) -> str:
             if not chapter_values:
-                return "Select a chapter to preview"
+                return "选择章节查看提取的文本"
 
             last = chapter_values[-1]
             try:
@@ -602,16 +602,16 @@ def create_app() -> gr.Blocks:
                 fname = last[1:fname_end]
                 idx = int(last[fname_end + 2:].split(":")[0])
             except (ValueError, IndexError):
-                return "Invalid selection"
+                return "选择无效"
 
             parse_result = state.parse_result
             if parse_result is None or idx >= len(parse_result.chapters):
-                return "Chapter not found"
+                return "章节未找到"
 
             chapter = parse_result.chapters[idx]
             text = "\n\n".join(chapter.paragraphs)
             if len(text) > 5000:
-                text = text[:5000] + "\n\n... (truncated)"
+                text = text[:5000] + "\n\n...（已截断）"
             return f"### {chapter.title}\n\n{text}"
 
         chapter_selector.select(
@@ -670,23 +670,23 @@ def _format_status(progress) -> str:
     msg = progress.message
 
     if status == ConversionStatus.IDLE:
-        return "Ready"
+        return "就绪"
     if status == ConversionStatus.PARSING:
-        return "Parsing ebook..."
+        return "正在解析电子书..."
     if status == ConversionStatus.CONVERTING:
         elapsed = progress.elapsed_seconds
         remaining = progress.estimated_remaining
         parts = [msg] if msg else []
-        parts.append(f"Elapsed: {elapsed:.0f}s")
+        parts.append(f"已用时: {elapsed:.0f}s")
         if remaining > 0:
-            parts.append(f"ETA: {remaining:.0f}s")
+            parts.append(f"预计剩余: {remaining:.0f}s")
         return " | ".join(parts)
     if status == ConversionStatus.COMPLETED:
-        return f"Completed in {progress.elapsed_seconds:.0f}s"
+        return f"完成，耗时 {progress.elapsed_seconds:.0f}s"
     if status == ConversionStatus.CANCELLED:
-        return "Cancelled"
+        return "已取消"
     if status == ConversionStatus.ERROR:
-        return f"Error: {msg}"
+        return f"错误: {msg}"
     return str(status)
 
 
