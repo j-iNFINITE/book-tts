@@ -10,6 +10,15 @@ from book_tts.config import DEFAULT_BASE_URL, DEFAULT_VOICE, DEFAULT_STYLE
 
 
 @dataclass
+class VoicePreview:
+    """Typed container for voice preview components."""
+
+    preview_text: gr.Textbox
+    test_btn: gr.Button
+    preview_audio: gr.Audio
+
+
+@dataclass
 class TTSSettings:
     """Typed container for TTS settings components."""
 
@@ -38,7 +47,7 @@ def create_file_upload() -> gr.File:
 
 def create_tts_settings() -> TTSSettings:
     from book_tts.utils.history import load_history
-    voices, styles = load_history()
+    voices, styles, api_keys_list, base_url_hist = load_history()
     if DEFAULT_VOICE not in voices:
         voices.insert(0, DEFAULT_VOICE)
     if styles:
@@ -47,6 +56,9 @@ def create_tts_settings() -> TTSSettings:
         styles.insert(0, DEFAULT_STYLE)
     else:
         styles.insert(0, DEFAULT_STYLE)
+
+    api_keys_value = "\n".join(api_keys_list) if api_keys_list else ""
+    base_url_value = base_url_hist if base_url_hist else DEFAULT_BASE_URL
 
     with gr.Group():
         gr.Markdown("### TTS Settings")
@@ -64,12 +76,13 @@ def create_tts_settings() -> TTSSettings:
         )
         api_keys = gr.Textbox(
             label="API Keys (one per line)",
+            value=api_keys_value,
             lines=3,
             placeholder="Enter your API keys, one per line",
         )
         base_url = gr.Textbox(
             label="API Base URL",
-            value=DEFAULT_BASE_URL,
+            value=base_url_value,
             placeholder="https://api.example.com",
         )
     return TTSSettings(
@@ -85,6 +98,13 @@ def create_chapter_selector() -> gr.CheckboxGroup:
         label="Chapters",
         choices=[],
         value=[],
+    )
+
+
+def create_chapter_preview() -> gr.Markdown:
+    return gr.Markdown(
+        value="Select a chapter to preview",
+        label="Chapter Preview",
     )
 
 
@@ -107,9 +127,48 @@ def create_progress_display() -> ProgressDisplay:
     )
 
 
-def create_audio_preview() -> gr.Audio:
-    return gr.Audio(
-        label="Audiobook Preview",
-        type="filepath",
+def create_checkpoint_status() -> gr.Markdown:
+    return gr.Markdown(
+        value="",
+        visible=False,
+    )
+
+
+def create_retry_button() -> gr.Button:
+    return gr.Button(
+        "Retry Failed",
+        variant="secondary",
         interactive=False,
+    )
+
+
+def create_completion_summary() -> gr.Markdown:
+    return gr.Markdown(
+        value="",
+        visible=False,
+    )
+
+
+@dataclass
+class CostEstimator:
+    """Typed container for cost estimation components."""
+
+    price_input: gr.Textbox
+    estimate_btn: gr.Button
+    cost_display: gr.Markdown
+
+
+def create_cost_estimator() -> CostEstimator:
+    with gr.Group():
+        gr.Markdown("### Cost Estimator")
+        price_input = gr.Textbox(
+            label="Price per 1M tokens (¥)",
+            value="0.15",
+        )
+        estimate_btn = gr.Button("Estimate Cost", variant="secondary")
+        cost_display = gr.Markdown(value="")
+    return CostEstimator(
+        price_input=price_input,
+        estimate_btn=estimate_btn,
+        cost_display=cost_display,
     )

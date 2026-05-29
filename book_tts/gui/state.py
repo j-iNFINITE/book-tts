@@ -24,10 +24,12 @@ from book_tts.pipeline import (
     ConversionPipeline,
     PipelineConfig,
     PipelineEvent,
+    ChapterDoneEvent,
     CompletedEvent,
     CancelledEvent,
     ErrorEvent,
 )
+from book_tts.utils.checkpoint import CheckpointManager
 from book_tts.utils.progress import ProgressTracker
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,8 @@ class ConversionState:
         self._epub_parser = EPUBParser()
         self._mobi_parser = MOBIParser()
         self._md_parser = MarkdownParser()
+        self._checkpoint_summary: Optional[dict] = None
+        self._failed_chapters: set[int] = set()
 
     # ── Properties ────────────────────────────────────────────────────────
 
@@ -88,6 +92,46 @@ class ConversionState:
                 return self._pipeline.chapter_files
         return []
 
+    @property
+    def checkpoint_summary(self) -> Optional[dict]:
+        with self._lock:
+            return self._checkpoint_summary
+
+    @property
+    def failed_chapters(self) -> set[int]:
+        with self._lock:
+            return set(self._failed_chapters)
+
+    def add_failed_chapter(self, idx: int) -> None:
+        with self._lock:
+            self._failed_chapters.add(idx)
+
+    def clear_failed_chapters(self) -> None:
+        with self._lock:
+            self._failed_chapters.clear()
+
+    def check_checkpoint(self, file_path: str | Path, output_dir: Optional[Path] = None) -> Optional[dict]:
+        """Check if a checkpoint exists for the given file.
+
+        Returns checkpoint summary dict if found, None otherwise.
+        """
+        path = Path(file_path)
+        out_dir = output_dir or self._output_dir
+        book_dir = out_dir / path.stem
+        checkpoint_path = book_dir / "checkpoint.json"
+
+        if not checkpoint_path.exists():
+            return None
+
+        try:
+            mgr = CheckpointManager(checkpoint_path)
+            summary = mgr.get_summary()
+            if summary["has_checkpoint"] and summary["completed_count"] > 0:
+                return summary
+        except Exception:
+            pass
+        return None
+
     # ── Parsing ───────────────────────────────────────────────────────────
 
     def parse_file(self, file_path: str | Path) -> ParseResult:
@@ -116,6 +160,7 @@ class ConversionState:
         with self._lock:
             self._parse_result = result
             self._selected_chapters = list(range(len(result.chapters)))
+            self._checkpoint_summary = self.check_checkpoint(path)
 
         logger.info(
             "Parsed %s: %d chapters found", path.name, len(result.chapters)
@@ -136,6 +181,7 @@ class ConversionState:
         base_url: str = "",
         input_path: Optional[Path] = None,
         output_dir: Optional[Path] = None,
+        resume: bool = False,
     ) -> None:
         """Start conversion in a background thread.
 
@@ -166,7 +212,7 @@ class ConversionState:
 
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
-            args=(tts_config, input_p, chapters, out_dir),
+            args=(tts_config, input_p, chapters, out_dir, resume),
             daemon=True,
             name="conversion-worker",
         )
@@ -178,6 +224,7 @@ class ConversionState:
         input_path: Path,
         chapter_indices: List[int],
         output_dir: Path,
+        resume: bool = False,
     ) -> None:
         config = PipelineConfig(tts=tts_config, output_dir=output_dir)
         tracker = ProgressTracker(total_chapters=len(chapter_indices))
@@ -187,11 +234,18 @@ class ConversionState:
             self._pipeline = pipeline
 
         try:
-            for _event in pipeline.convert(input_path, chapter_indices):
-                pass  # Progress is driven through the shared ProgressTracker
+            successful: set[int] = set()
+            for event in pipeline.convert(input_path, chapter_indices, resume=resume):
+                if isinstance(event, ChapterDoneEvent):
+                    successful.add(event.index)
+            failed = set(chapter_indices) - successful
+            with self._lock:
+                self._failed_chapters = failed
         except Exception as exc:
             logger.error("Conversion failed: %s", exc, exc_info=True)
             tracker.set_error(str(exc))
+            with self._lock:
+                self._failed_chapters = set(chapter_indices)
 
     def cancel(self) -> None:
         with self._lock:
@@ -217,4 +271,5 @@ class ConversionState:
             self._parse_result = None
             self._selected_chapters = []
             self._pipeline = None
+            self._failed_chapters.clear()
             logger.info("State reset")

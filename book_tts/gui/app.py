@@ -8,14 +8,15 @@ from typing import Generator, List, Optional
 
 import gradio as gr
 
-from book_tts.config import DEFAULT_OUTPUT_DIR, DEFAULT_VOICE, DEFAULT_STYLE
+from book_tts.config import DEFAULT_BASE_URL, DEFAULT_OUTPUT_DIR, DEFAULT_VOICE, DEFAULT_STYLE
 from book_tts.gui.components import (
     ProgressDisplay,
     TTSSettings,
-    create_audio_preview,
     create_chapter_selector,
+    create_checkpoint_status,
     create_file_upload,
     create_progress_display,
+    create_retry_button,
     create_tts_settings,
 )
 from book_tts.gui.state import ConversionState
@@ -45,9 +46,12 @@ def create_app() -> gr.Blocks:
             with gr.Column(scale=1):
                 file_upload = create_file_upload()
                 tts_settings = create_tts_settings()
+                voice_preview = create_voice_preview()
                 parse_btn = gr.Button("Parse Ebook", variant="secondary")
                 chapter_selector = create_chapter_selector()
+                chapter_preview = create_chapter_preview()
                 book_info = gr.Markdown("")
+                cost_estimator = create_cost_estimator()
 
             with gr.Column(scale=1):
                 with gr.Row():
@@ -60,13 +64,63 @@ def create_app() -> gr.Blocks:
                     dry_run_btn = gr.Button(
                         "Dry Run Preview", variant="secondary", interactive=False
                     )
+                    retry_btn = create_retry_button()
                 progress_display = create_progress_display()
+                completion_summary = create_completion_summary()
                 dry_run_info = gr.Markdown("")
-                audio_preview = create_audio_preview()
+                checkpoint_status = create_checkpoint_status()
                 output_dir_input = gr.Textbox(
                     label="Output Directory",
                     value=str(DEFAULT_OUTPUT_DIR),
                 )
+
+        # ── Voice preview handler ────────────────────────────────────
+
+        def handle_voice_preview(preview_text, voice, style, api_keys_str, base_url):
+            if not preview_text.strip():
+                gr.Warning("Please enter text to preview")
+                return None
+
+            api_keys = [k.strip() for k in api_keys_str.strip().split("\n") if k.strip()]
+
+            try:
+                if api_keys:
+                    from book_tts.tts.client import MiMoTTSClient
+                    from book_tts.models import TTSConfig
+
+                    config = TTSConfig(
+                        api_keys=tuple(api_keys),
+                        voice=voice or DEFAULT_VOICE,
+                        style=style or "",
+                        base_url=base_url or DEFAULT_BASE_URL,
+                    )
+                    client = MiMoTTSClient(config)
+                else:
+                    from book_tts.tts.edge_client import EdgeTTSClient
+
+                    client = EdgeTTSClient(voice=voice or "zh-CN-XiaoyiNeural")
+
+                audio_bytes = client.synthesize(text=preview_text)
+
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                    f.write(audio_bytes)
+                    return f.name
+            except Exception as exc:
+                gr.Warning(f"Voice preview failed: {exc}")
+                return None
+
+        voice_preview.test_btn.click(
+            fn=handle_voice_preview,
+            inputs=[
+                voice_preview.preview_text,
+                tts_settings.voice,
+                tts_settings.style,
+                tts_settings.api_keys,
+                tts_settings.base_url,
+            ],
+            outputs=[voice_preview.preview_audio],
+        )
 
         # ── Parse handler ─────────────────────────────────────────────
 
@@ -78,11 +132,13 @@ def create_app() -> gr.Blocks:
                     gr.update(interactive=False),
                     gr.update(interactive=False),
                     "No file uploaded.",
+                    gr.update(value="", visible=False),
                 )
 
             all_choices = []
             all_info = []
             errors = []
+            checkpoint_messages = []
 
             for fpath in file_paths:
                 try:
@@ -96,6 +152,13 @@ def create_app() -> gr.Blocks:
                     if meta.author:
                         info += f" by {meta.author}"
                     all_info.append(info)
+
+                    ckpt = state.checkpoint_summary
+                    if ckpt:
+                        checkpoint_messages.append(
+                            f"**{fname}**: Found checkpoint — "
+                            f"{ckpt['completed_count']}/{len(result.chapters)} chapters completed"
+                        )
                 except Exception as exc:
                     errors.append(f"{Path(fpath).name}: {exc}")
 
@@ -108,19 +171,24 @@ def create_app() -> gr.Blocks:
                     gr.update(interactive=False),
                     gr.update(interactive=False),
                     "No chapters found.",
+                    gr.update(value="", visible=False),
                 )
+
+            checkpoint_text = "\n".join(checkpoint_messages) if checkpoint_messages else ""
+            show_checkpoint = bool(checkpoint_text)
 
             return (
                 gr.update(choices=all_choices, value=list(all_choices)),
                 gr.update(interactive=True),
                 gr.update(interactive=True),
                 " | ".join(all_info),
+                gr.update(value=checkpoint_text, visible=show_checkpoint),
             )
 
         parse_btn.click(
             fn=handle_parse,
             inputs=[file_upload],
-            outputs=[chapter_selector, convert_btn, dry_run_btn, book_info],
+            outputs=[chapter_selector, convert_btn, dry_run_btn, book_info, checkpoint_status],
         )
 
         # ── Dry-run handler ───────────────────────────────────────────
@@ -178,6 +246,46 @@ def create_app() -> gr.Blocks:
             outputs=[progress_display.status_text, dry_run_info],
         )
 
+        # ── Cost estimate handler ────────────────────────────────────
+
+        def handle_cost_estimate(chapter_values, price_per_million):
+            if not chapter_values:
+                return "Select chapters to estimate cost"
+            try:
+                price = float(price_per_million)
+            except ValueError:
+                return "Invalid price"
+
+            parse_result = state.parse_result
+            if parse_result is None:
+                return "No book parsed"
+
+            total_chars = 0
+            for val in chapter_values:
+                try:
+                    fname_end = val.index("]")
+                    idx = int(val[fname_end + 2:].split(":")[0])
+                    if idx < len(parse_result.chapters):
+                        total_chars += parse_result.chapters[idx].word_count
+                except (ValueError, IndexError):
+                    continue
+
+            total_tokens = int(total_chars * 1.5)
+            cost = (total_tokens / 1_000_000) * price
+
+            return (
+                f"### Cost Estimation\n"
+                f"- **Characters**: {total_chars:,}\n"
+                f"- **Estimated tokens**: {total_tokens:,} (1.5 tokens/char)\n"
+                f"- **Estimated cost**: ¥{cost:.2f}"
+            )
+
+        cost_estimator.estimate_btn.click(
+            fn=handle_cost_estimate,
+            inputs=[chapter_selector, cost_estimator.price_input],
+            outputs=[cost_estimator.cost_display],
+        )
+
         # ── Convert handler ───────────────────────────────────────────
 
         def handle_convert(
@@ -190,7 +298,10 @@ def create_app() -> gr.Blocks:
             output_dir: str,
         ) -> Generator:
             if voice and voice.strip():
-                history_record(voice=voice.strip(), style=(style or "").strip())
+                history_record(
+                    voice=voice.strip(),
+                    style=(style or "").strip(),
+                )
 
             if not file_paths:
                 gr.Warning("No file uploaded.")
@@ -210,6 +321,8 @@ def create_app() -> gr.Blocks:
                     progress_display.progress_bar: 0,
                 }
                 return
+
+            history_record(api_keys=api_keys, base_url=(base_url or "").strip())
 
             # Group selected chapters by file
             file_chapters: dict[str, list[int]] = {}
@@ -258,17 +371,36 @@ def create_app() -> gr.Blocks:
                         base_url=base_url,
                         input_path=Path(fpath),
                         output_dir=out_dir,
+                        resume=True,
                     )
                 except Exception as exc:
                     gr.Warning(f"Failed to process {fname}: {exc}")
                     continue
 
-                yield from _stream_progress(state, progress_display, audio_preview)
+                yield from _stream_progress(state, progress_display)
 
             yield {
                 progress_display.status_text: f"All {total_files} files completed",
                 progress_display.progress_bar: 100,
             }
+
+            failed = state.failed_chapters
+            if failed:
+                marked_choices = []
+                for ch in chapter_selector.choices:
+                    if _get_chapter_idx(ch) in failed:
+                        marked_choices.append(f"❌ {ch}")
+                    else:
+                        marked_choices.append(ch)
+                yield {
+                    chapter_selector: gr.update(choices=marked_choices),
+                    retry_btn: gr.update(interactive=True),
+                }
+            else:
+                state.clear_failed_chapters()
+                yield {
+                    retry_btn: gr.update(interactive=False),
+                }
 
         def update_stop_state() -> dict:
             return {
@@ -294,6 +426,29 @@ def create_app() -> gr.Blocks:
                 tts_settings.style: gr.update(choices=styles),
             }
 
+        def handle_completion_summary() -> dict:
+            progress = state.get_progress()
+            if progress.status != ConversionStatus.COMPLETED:
+                return {completion_summary: gr.update(visible=False)}
+
+            elapsed = progress.elapsed_seconds
+            chapter_count = len(progress.chapter_files)
+
+            total_size = 0
+            for f in progress.chapter_files:
+                p = Path(str(f))
+                if p.exists():
+                    total_size += p.stat().st_size
+
+            size_mb = total_size / (1024 * 1024)
+
+            summary = f"""### Conversion Complete
+- **Time**: {elapsed:.0f}s
+- **Chapters**: {chapter_count}
+- **Total size**: {size_mb:.1f} MB"""
+
+            return {completion_summary: gr.update(value=summary, visible=True)}
+
         convert_btn.click(
             fn=update_stop_state,
             inputs=[],
@@ -313,7 +468,8 @@ def create_app() -> gr.Blocks:
             outputs=[
                 progress_display.status_text,
                 progress_display.progress_bar,
-                audio_preview,
+                chapter_selector,
+                retry_btn,
             ],
         ).then(
             fn=re_enable_convert,
@@ -324,6 +480,11 @@ def create_app() -> gr.Blocks:
             fn=refresh_settings_choices,
             inputs=[],
             outputs=[tts_settings.voice, tts_settings.style],
+            queue=False,
+        ).then(
+            fn=handle_completion_summary,
+            inputs=[],
+            outputs=[completion_summary],
             queue=False,
         )
 
@@ -339,13 +500,129 @@ def create_app() -> gr.Blocks:
             outputs=[progress_display.status_text],
         )
 
+        # ── Retry handler ─────────────────────────────────────────────
+
+        def handle_retry(
+            file_paths: Optional[List[str]],
+            chapter_values: List[str],
+            voice: str,
+            style: str,
+            api_keys_str: str,
+            base_url: str,
+            output_dir: str,
+        ) -> Generator:
+            failed = state.failed_chapters
+            if not failed:
+                gr.Warning("No failed chapters to retry")
+                yield {
+                    progress_display.status_text: "No failed chapters to retry",
+                    retry_btn: gr.update(interactive=False),
+                }
+                return
+
+            failed_values = [v for v in chapter_values if _get_chapter_idx(v) in failed]
+            if not failed_values:
+                gr.Warning("No failed chapters found in selection")
+                yield {
+                    progress_display.status_text: "No failed chapters in selection",
+                    retry_btn: gr.update(interactive=False),
+                }
+                return
+
+            state.clear_failed_chapters()
+
+            clean_choices = [ch.removeprefix("❌ ") for ch in chapter_selector.choices]
+            yield {
+                chapter_selector: gr.update(choices=clean_choices),
+            }
+
+            yield from handle_convert(
+                file_paths, failed_values, voice, style,
+                api_keys_str, base_url, output_dir,
+            )
+
+            still_failed = state.failed_chapters
+            if still_failed:
+                marked_choices = []
+                for ch in clean_choices:
+                    if _get_chapter_idx(ch) in still_failed:
+                        marked_choices.append(f"❌ {ch}")
+                    else:
+                        marked_choices.append(ch)
+                yield {
+                    chapter_selector: gr.update(choices=marked_choices),
+                    retry_btn: gr.update(interactive=True),
+                }
+            else:
+                yield {
+                    retry_btn: gr.update(interactive=False),
+                }
+
+        retry_btn.click(
+            fn=update_stop_state,
+            inputs=[],
+            outputs=[convert_btn, stop_btn],
+            queue=False,
+        ).then(
+            fn=handle_retry,
+            inputs=[
+                file_upload,
+                chapter_selector,
+                tts_settings.voice,
+                tts_settings.style,
+                tts_settings.api_keys,
+                tts_settings.base_url,
+                output_dir_input,
+            ],
+            outputs=[
+                progress_display.status_text,
+                progress_display.progress_bar,
+                chapter_selector,
+                retry_btn,
+            ],
+        ).then(
+            fn=re_enable_convert,
+            inputs=[],
+            outputs=[convert_btn, stop_btn],
+            queue=False,
+        )
+
+        # ── Chapter preview handler ──────────────────────────────────
+
+        def handle_chapter_preview(chapter_values: list[str]) -> str:
+            if not chapter_values:
+                return "Select a chapter to preview"
+
+            last = chapter_values[-1]
+            try:
+                fname_end = last.index("]")
+                fname = last[1:fname_end]
+                idx = int(last[fname_end + 2:].split(":")[0])
+            except (ValueError, IndexError):
+                return "Invalid selection"
+
+            parse_result = state.parse_result
+            if parse_result is None or idx >= len(parse_result.chapters):
+                return "Chapter not found"
+
+            chapter = parse_result.chapters[idx]
+            text = "\n\n".join(chapter.paragraphs)
+            if len(text) > 5000:
+                text = text[:5000] + "\n\n... (truncated)"
+            return f"### {chapter.title}\n\n{text}"
+
+        chapter_selector.select(
+            fn=handle_chapter_preview,
+            inputs=[chapter_selector],
+            outputs=[chapter_preview],
+        )
+
     return app
 
 
 def _stream_progress(
     state: ConversionState,
     progress_display: ProgressDisplay,
-    audio_preview: gr.Audio,
 ) -> Generator:
     while state.is_converting:
         progress = state.get_progress()
@@ -362,12 +639,9 @@ def _stream_progress(
     pct = _compute_percent(final)
     status = _format_status(final)
 
-    audio_path = _find_audiobook(final)
-
     yield {
         progress_display.status_text: status,
         progress_display.progress_bar: pct,
-        audio_preview: audio_path,
     }
 
 
@@ -376,6 +650,16 @@ def _compute_percent(progress) -> float:
     if total <= 0:
         return 0.0
     return round((progress.current_chapter / total) * 100, 1)
+
+
+def _get_chapter_idx(choice: str) -> int:
+    """Extract chapter index from a selector choice string."""
+    val = choice.removeprefix("❌ ")
+    try:
+        fname_end = val.index("]")
+        return int(val[fname_end + 2:].split(":")[0])
+    except (ValueError, IndexError):
+        return -1
 
 
 def _format_status(progress) -> str:
@@ -401,14 +685,6 @@ def _format_status(progress) -> str:
     if status == ConversionStatus.ERROR:
         return f"Error: {msg}"
     return str(status)
-
-
-def _find_audiobook(progress) -> Optional[str]:
-    for f in progress.chapter_files:
-        path = Path(str(f))
-        if path.suffix == ".mp3" and path.is_file():
-            return str(path)
-    return None
 
 
 def launch() -> None:
