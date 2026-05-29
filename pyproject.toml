@@ -26,32 +26,32 @@ classifiers = [
     "Topic :: Text Processing :: Linguistic",
 ]
 dependencies = [
-    "ebooklib>=0.18",
-    "beautifulsoup4>=4.12",
-    "lxml>=5.0",
+    "ebooklib",
+    "beautifulsoup4",
+    "lxml",
     "mobi",
-    "requests>=2.31",
-    "urllib3>=2.0",
-    "numpy>=1.24",
-    "soundfile>=0.12",
-    "pydub>=0.25",
-    "tqdm>=4.65",
-    "gradio>=4.0",
-    "json-repair>=0.15",
-    "Pillow>=10.0",
+    "requests",
+    "urllib3",
+    "numpy",
+    "soundfile",
+    "pydub",
+    "tqdm",
+    "gradio",
+    "json-repair",
+    "Pillow",
 ]
 
 [project.optional-dependencies]
-audio = ["mutagen>=4.9"]
-edge = ["edge-tts>=6.1"]
-wetext = ["WeTextProcessing>=1.0"]
+audio = ["mutagen"]
+edge = ["edge-tts"]
+wetext = ["WeTextProcessing"]
 dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "pytest-asyncio>=0.21",
-    "black>=23.0",
-    "ruff>=0.1.0",
-    "mypy>=1.5",
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "black",
+    "ruff",
+    "mypy",
 ]
 
 [project.scripts]
