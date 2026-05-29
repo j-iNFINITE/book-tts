@@ -32,13 +32,9 @@ dependencies = [
     "mobi",
     "requests",
     "urllib3",
-    "numpy",
-    "soundfile",
     "pydub",
     "tqdm",
     "gradio",
-    "json-repair",
-    "Pillow",
 ]
 
 [project.optional-dependencies]
