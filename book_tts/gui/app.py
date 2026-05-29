@@ -12,6 +12,7 @@ from book_tts.config import DEFAULT_BASE_URL, DEFAULT_OUTPUT_DIR, DEFAULT_VOICE,
 from book_tts.gui.components import (
     ProgressDisplay,
     TTSSettings,
+    create_chapter_preview,
     create_chapter_selector,
     create_checkpoint_status,
     create_completion_summary,
@@ -41,7 +42,6 @@ def create_app() -> gr.Blocks:
 
     with gr.Blocks(
         title="Book TTS - Ebook to Audiobook",
-        theme=gr.themes.Soft(),
     ) as app:
         gr.Markdown("# Book TTS\nConvert ebooks to audiobooks using TTS synthesis.")
 
@@ -692,4 +692,4 @@ def _format_status(progress) -> str:
 
 def launch() -> None:
     app = create_app()
-    app.launch()
+    app.launch(theme=gr.themes.Soft())
