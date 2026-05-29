@@ -210,9 +210,16 @@ class ConversionState:
             base_url=base_url,
         )
 
+        config = PipelineConfig(tts=tts_config, output_dir=out_dir)
+        tracker = ProgressTracker(total_chapters=len(chapters))
+        pipeline = ConversionPipeline(config, tracker=tracker)
+
+        with self._lock:
+            self._pipeline = pipeline
+
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
-            args=(tts_config, input_p, chapters, out_dir, resume),
+            args=(pipeline, input_p, chapters, resume),
             daemon=True,
             name="conversion-worker",
         )
@@ -220,19 +227,11 @@ class ConversionState:
 
     def _run_conversion(
         self,
-        tts_config: TTSConfig,
+        pipeline: ConversionPipeline,
         input_path: Path,
         chapter_indices: List[int],
-        output_dir: Path,
         resume: bool = False,
     ) -> None:
-        config = PipelineConfig(tts=tts_config, output_dir=output_dir)
-        tracker = ProgressTracker(total_chapters=len(chapter_indices))
-        pipeline = ConversionPipeline(config, tracker=tracker)
-
-        with self._lock:
-            self._pipeline = pipeline
-
         try:
             successful: set[int] = set()
             for event in pipeline.convert(input_path, chapter_indices, resume=resume):
