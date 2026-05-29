@@ -172,3 +172,19 @@ def create_cost_estimator() -> CostEstimator:
         estimate_btn=estimate_btn,
         cost_display=cost_display,
     )
+
+
+def create_voice_preview() -> VoicePreview:
+    with gr.Group():
+        gr.Markdown("### Voice Preview")
+        preview_text = gr.Textbox(
+            label="Preview Text",
+            value="你好，这是一段语音测试。",
+        )
+        test_btn = gr.Button("Test Voice", variant="secondary")
+        preview_audio = gr.Audio(label="Preview Audio", interactive=False)
+    return VoicePreview(
+        preview_text=preview_text,
+        test_btn=test_btn,
+        preview_audio=preview_audio,
+    )
