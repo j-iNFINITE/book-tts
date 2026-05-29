@@ -29,6 +29,7 @@ dependencies = [
     "ebooklib>=0.18",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
+    "mobi>=0.5",
     "requests>=2.31",
     "urllib3>=2.0",
     "numpy>=1.24",
@@ -41,6 +42,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+audio = ["mutagen>=4.9"]
+edge = ["edge-tts>=6.1"]
+wetext = ["WeTextProcessing>=1.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

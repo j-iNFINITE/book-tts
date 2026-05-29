@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
@@ -57,7 +56,6 @@ class MOBIParser(BaseBookParser):
         """Unpack MOBI with the ``mobi`` library and parse HTML + NCX."""
         import mobi  # type: ignore[import-untyped]
 
-        tmp_dir = Path(tempfile.mkdtemp(prefix="book_tts_mobi_"))
         try:
             extracted_dir, content_path = mobi.extract(str(file_path))
             extracted = Path(extracted_dir)
@@ -97,7 +95,7 @@ class MOBIParser(BaseBookParser):
 
             return self._extract_chapters_from_html(html_path, chapters_meta)
         finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            shutil.rmtree(extracted, ignore_errors=True)
 
     # ── NCX parsing ──────────────────────────────────────────────────────
 
