@@ -124,3 +124,13 @@ class MiMoTTSClient:
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         return session
+
+    def close(self) -> None:
+        """Close the underlying HTTP session to release resources."""
+        self._session.close()
+
+    def __enter__(self) -> "MiMoTTSClient":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
