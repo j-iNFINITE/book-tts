@@ -11,9 +11,10 @@ import time
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING, Iterator, Optional
 
 from book_tts.audio.merger import AudioMerger
+from book_tts.audio.m4b_builder import M4BBuilder
 from book_tts.config import AUDIO_FORMAT, DEFAULT_OUTPUT_DIR
 from book_tts.markup import MarkupInjector
 from book_tts.models import (
@@ -28,10 +29,15 @@ from book_tts.parsers.mobi_parser import MOBIParser
 from book_tts.parsers.markdown_parser import MarkdownParser
 from book_tts.parsers.base import BaseBookParser
 from book_tts.parsers.text_cleaner import TextCleaner
-from book_tts.tts.client import MiMoTTSClient
 from book_tts.tts.synthesizer import ParagraphSynthesizer
+
+if TYPE_CHECKING:
+    from book_tts.tts.client import MiMoTTSClient
+    from book_tts.tts.edge_client import EdgeTTSClient
+
 from book_tts.tts.sml import strip_sml_tokens
-from book_tts.utils.file_utils import sanitize_filename, safe_json_save
+from book_tts.utils.checkpoint import CheckpointManager
+from book_tts.utils.file_utils import check_ffmpeg, sanitize_filename, safe_json_save
 from book_tts.utils.progress import ProgressTracker
 
 logger = logging.getLogger(__name__)
@@ -46,6 +52,7 @@ class PipelineConfig:
 
     tts: TTSConfig
     output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
+    output_format: str = "mp3"  # "mp3" or "m4b"
 
 
 # ── Events ────────────────────────────────────────────────────────────────────
@@ -177,9 +184,15 @@ class ConversionPipeline:
         self,
         input_path: Path,
         chapter_indices: Optional[list[int]] = None,
+        resume: bool = False,
     ) -> Iterator[PipelineEvent]:
         """Run the full conversion pipeline, yielding events as progress is made."""
         self._cancel_event.clear()
+        if not check_ffmpeg():
+            raise RuntimeError(
+                "ffmpeg not found. Please install it: "
+                "https://ffmpeg.org/download.html"
+            )
         with self._lock:
             self._is_running = True
             self._chapter_files = []
@@ -202,100 +215,180 @@ class ConversionPipeline:
 
         book_dir, chapters_dir = self._prepare_dirs(input_path)
 
-        client = MiMoTTSClient(self._config.tts)
-        cleaner = TextCleaner()
-        merger = AudioMerger()
-        injector = MarkupInjector()
+        checkpoint: Optional[CheckpointManager] = None
+        if resume:
+            checkpoint = CheckpointManager(book_dir / "checkpoint.json")
 
-        if self._tracker is None:
-            self._tracker = ProgressTracker(total_chapters=len(selected))
-        self._tracker.start()
+        if self._config.tts.api_keys:
+            from book_tts.tts.client import MiMoTTSClient
 
-        chapter_audio_paths: list[Path] = []
-        chapter_titles: list[str] = []
+            client: MiMoTTSClient | EdgeTTSClient = MiMoTTSClient(self._config.tts)
+        else:
+            try:
+                from book_tts.tts.edge_client import EdgeTTSClient
 
-        for pos, ch_idx in enumerate(selected):
-            if self._cancel_event.is_set():
-                yield CancelledEvent(tuple(chapter_audio_paths))
+                client = EdgeTTSClient(voice=self._config.tts.voice)
+                logger.info("Using EdgeTTS fallback (no API key provided)")
+            except ImportError:
+                raise RuntimeError(
+                    "No API keys provided and edge-tts not installed. "
+                    "Install with: pip install book-tts[edge]"
+                )
+        try:
+            cleaner = TextCleaner()
+            merger = AudioMerger()
+            injector = MarkupInjector()
+
+            if self._tracker is None:
+                self._tracker = ProgressTracker(total_chapters=len(selected))
+            self._tracker.start()
+
+            chapter_audio_paths: list[Path] = []
+            chapter_titles: list[str] = []
+
+            for pos, ch_idx in enumerate(selected):
+                if self._cancel_event.is_set():
+                    yield CancelledEvent(tuple(chapter_audio_paths))
+                    with self._lock:
+                        self._is_running = False
+                    return
+
+                chapter = chapters[ch_idx]
+                ch_title = chapter.title
+                safe_name = sanitize_filename(ch_title) or f"chapter_{ch_idx:04d}"
+                chapter_output = chapters_dir / f"{ch_idx:04d}_{safe_name}.{AUDIO_FORMAT}"
+
+                # Checkpoint: skip already-completed chapters
+                if checkpoint is not None and checkpoint.is_done(ch_idx):
+                    logger.info("Skipping chapter %d (already done): %s", ch_idx, ch_title)
+                    chapter_audio_paths.append(chapter_output)
+                    chapter_titles.append(ch_title)
+                    with self._lock:
+                        self._chapter_files.append(chapter_output)
+                    if self._tracker is not None:
+                        self._tracker.add_chapter_file(chapter_output)
+                    yield ChapterDoneEvent(
+                        index=ch_idx,
+                        title=ch_title,
+                        path=chapter_output,
+                    )
+                    continue
+
+                yield ProgressEvent(
+                    current=pos + 1,
+                    total=len(selected),
+                    message=f"Synthesizing chapter {pos + 1}/{len(selected)}: {ch_title}",
+                )
+
+                # Inject SML tokens from boundary metadata
+                tagged_paragraphs = injector.inject(
+                    list(chapter.paragraphs),
+                    list(chapter.boundaries) if chapter.boundaries else None,
+                )
+
+                synthesizer = ParagraphSynthesizer(
+                    tts_client=client,
+                    cleaner=cleaner,
+                    progress_tracker=self._tracker,
+                )
+
+                para_dir = chapters_dir / f"_para_{ch_idx:04d}"
+                para_dir.mkdir(parents=True, exist_ok=True)
+
+                try:
+                    para_paths = synthesizer.synthesize_chapter(
+                        paragraphs=tagged_paragraphs,
+                        output_dir=para_dir,
+                        chapter_index=ch_idx,
+                        total_chapters=len(selected),
+                    )
+
+                    if para_paths:
+                        merged = merger.merge_to_chapter(
+                            audio_paths=para_paths,
+                            output_path=chapter_output,
+                        )
+                        if merged:
+                            chapter_audio_paths.append(merged)
+                            chapter_titles.append(ch_title)
+                            with self._lock:
+                                self._chapter_files.append(merged)
+                            if self._tracker is not None:
+                                self._tracker.add_chapter_file(merged)
+                            if checkpoint is not None:
+                                checkpoint.mark_done(ch_idx, ch_title, str(merged))
+                            yield ChapterDoneEvent(
+                                index=ch_idx,
+                                title=ch_title,
+                                path=merged,
+                            )
+                except Exception as exc:
+                    logger.error("Chapter %d failed: %s", ch_idx, exc)
+                    if checkpoint is not None:
+                        checkpoint.mark_error(ch_idx, str(exc))
+                    yield ProgressEvent(
+                        current=pos + 1,
+                        total=len(selected),
+                        message=f"Error on chapter {ch_idx}: {exc}",
+                    )
+
+                shutil.rmtree(para_dir, ignore_errors=True)
+
+            if not chapter_audio_paths:
+                yield ErrorEvent("No chapter audio was generated.")
                 with self._lock:
                     self._is_running = False
                 return
 
-            chapter = chapters[ch_idx]
-            ch_title = chapter.title
-            safe_name = sanitize_filename(ch_title) or f"chapter_{ch_idx:04d}"
-            chapter_output = chapters_dir / f"{ch_idx:04d}_{safe_name}.{AUDIO_FORMAT}"
+            # ── Embed cover art in MP3 chapters ────────────────────────────
+            if (
+                self._config.output_format != "m4b"
+                and parse_result.cover_image is not None
+            ):
+                for ch_path in chapter_audio_paths:
+                    merger.embed_cover(ch_path, parse_result.cover_image)
 
-            yield ProgressEvent(
-                current=pos + 1,
-                total=len(selected),
-                message=f"Synthesizing chapter {pos + 1}/{len(selected)}: {ch_title}",
-            )
-
-            # Inject SML tokens from boundary metadata
-            tagged_paragraphs = injector.inject(
-                list(chapter.paragraphs),
-                list(chapter.boundaries) if chapter.boundaries else None,
-            )
-
-            synthesizer = ParagraphSynthesizer(
-                tts_client=client,
-                cleaner=cleaner,
-                progress_tracker=self._tracker,
-            )
-
-            para_dir = chapters_dir / f"_para_{ch_idx:04d}"
-            para_dir.mkdir(parents=True, exist_ok=True)
-
-            para_paths = synthesizer.synthesize_chapter(
-                paragraphs=tagged_paragraphs,
-                output_dir=para_dir,
-                chapter_index=ch_idx,
-                total_chapters=len(selected),
-            )
-
-            if para_paths:
-                merged = merger.merge_to_chapter(
-                    audio_paths=para_paths,
-                    output_path=chapter_output,
-                )
-                if merged:
-                    chapter_audio_paths.append(merged)
-                    chapter_titles.append(ch_title)
-                    with self._lock:
-                        self._chapter_files.append(merged)
-                    if self._tracker is not None:
-                        self._tracker.add_chapter_file(merged)
-                    yield ChapterDoneEvent(
-                        index=ch_idx,
-                        title=ch_title,
-                        path=merged,
+            # ── Build M4B if requested ─────────────────────────────────────
+            final_files: list[Path] = list(chapter_audio_paths)
+            if self._config.output_format == "m4b":
+                m4b_path = book_dir / f"{input_path.stem}.m4b"
+                m4b_builder = M4BBuilder()
+                try:
+                    built = m4b_builder.build(
+                        chapter_paths=chapter_audio_paths,
+                        chapter_titles=chapter_titles,
+                        output_path=m4b_path,
+                        book_title=parse_result.metadata.title or input_path.stem,
+                        book_author=parse_result.metadata.author or "",
+                        cover_image=parse_result.cover_image,
                     )
+                    final_files = [built]
+                    with self._lock:
+                        self._chapter_files = [built]
+                    if self._tracker is not None:
+                        self._tracker.add_chapter_file(built)
+                    logger.info("M4B audiobook built: %s", built)
+                except Exception as exc:
+                    logger.warning("M4B build failed, keeping chapter files: %s", exc)
 
-            shutil.rmtree(para_dir, ignore_errors=True)
+            _save_podcast_metadata(
+                output_dir=book_dir,
+                metadata=parse_result.metadata,
+                chapter_titles=chapter_titles,
+                chapter_files=chapter_audio_paths,
+            )
 
-        if not chapter_audio_paths:
-            yield ErrorEvent("No chapter audio was generated.")
+            self._tracker.finish(ConversionStatus.COMPLETED)
+            elapsed = time.monotonic() - start_time
             with self._lock:
                 self._is_running = False
-            return
-
-        _save_podcast_metadata(
-            output_dir=book_dir,
-            metadata=parse_result.metadata,
-            chapter_titles=chapter_titles,
-            chapter_files=chapter_audio_paths,
-        )
-
-        self._tracker.finish(ConversionStatus.COMPLETED)
-        elapsed = time.monotonic() - start_time
-        with self._lock:
-            self._is_running = False
-        yield CompletedEvent(
-            metadata=parse_result.metadata,
-            chapter_files=tuple(chapter_audio_paths),
-            total_elapsed=elapsed,
-        )
+            yield CompletedEvent(
+                metadata=parse_result.metadata,
+                chapter_files=tuple(final_files),
+                total_elapsed=elapsed,
+            )
+        finally:
+            client.close()
 
     def dry_run(
         self,
@@ -304,6 +397,11 @@ class ConversionPipeline:
     ) -> Iterator[PipelineEvent]:
         """Parse and split text without TTS; write per-chapter .txt preview files."""
         self._cancel_event.clear()
+        if not check_ffmpeg():
+            raise RuntimeError(
+                "ffmpeg not found. Please install it: "
+                "https://ffmpeg.org/download.html"
+            )
 
         parse_result = self._parse(input_path)
         chapters = parse_result.chapters

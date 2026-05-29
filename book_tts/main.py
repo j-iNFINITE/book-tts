@@ -80,9 +80,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable verbose logging",
     )
     parser.add_argument(
+        "--format",
+        choices=["mp3", "m4b"],
+        default="mp3",
+        help="Output format (default: mp3)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Parse and split text without calling TTS; write per-chapter .txt files",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from checkpoint (skip completed chapters)",
     )
     return parser
 
@@ -172,6 +183,7 @@ def _run_convert(args: argparse.Namespace, input_path: Path) -> None:
     config = PipelineConfig(
         tts=tts_config,
         output_dir=Path(args.output),
+        output_format=getattr(args, "format", "mp3"),
     )
 
     pipeline = ConversionPipeline(config)
@@ -180,7 +192,7 @@ def _run_convert(args: argparse.Namespace, input_path: Path) -> None:
     chapter_count = 0
     pbar = tqdm(desc="Chapters", unit="ch")
 
-    for event in pipeline.convert(input_path):
+    for event in pipeline.convert(input_path, resume=args.resume):
         match event:
             case ProgressEvent(current, total, message):
                 if pbar.total is None or pbar.total != total:
@@ -209,6 +221,7 @@ def _run_dry(args: argparse.Namespace, input_path: Path) -> None:
     config = PipelineConfig(
         tts=TTSConfig(),
         output_dir=Path(args.output),
+        output_format=getattr(args, "format", "mp3"),
     )
 
     pipeline = ConversionPipeline(config)

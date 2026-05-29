@@ -101,3 +101,29 @@ class AudioMerger:
             output_path,
         )
         return output_path
+
+    def embed_cover(self, audio_path: Path, cover_image: bytes) -> None:
+        """Embed cover art into an MP3 file using mutagen."""
+        try:
+            from mutagen.mp3 import MP3
+            from mutagen.id3 import APIC
+        except ImportError:
+            logger.warning("mutagen not installed, skipping cover art embedding")
+            return
+
+        try:
+            audio = MP3(str(audio_path))
+            if audio.tags is None:
+                audio.add_tags()
+            audio.tags.add(
+                APIC(
+                    encoding=3,  # UTF-8
+                    mime="image/jpeg",
+                    type=3,  # Cover (front)
+                    data=cover_image,
+                )
+            )
+            audio.save()
+            logger.info("Cover art embedded in %s", audio_path)
+        except Exception as exc:
+            logger.warning("Failed to embed cover art: %s", exc)
