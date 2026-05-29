@@ -19,6 +19,9 @@ from book_tts.utils.progress import ProgressTracker
 
 logger = logging.getLogger(__name__)
 
+# Look-ahead window (chars) when searching for sentence boundaries near max_chars.
+LOOK_AHEAD_CHARS = 200
+
 
 class ParagraphSynthesizer:
     """Synthesize paragraphs to audio files with parallelism and retry.
@@ -195,8 +198,19 @@ class ParagraphSynthesizer:
             current = ""
             for s in sentences:
                 if len(current) + len(s) > max_chars and current:
-                    groups.append(current.strip())
-                    current = s
+                    look_ahead = s[:LOOK_AHEAD_CHARS]
+                    last_punct = -1
+                    for punct in '。！？.!?':
+                        pos = look_ahead.rfind(punct)
+                        if pos > last_punct:
+                            last_punct = pos
+                    if last_punct > 0:
+                        current += s[:last_punct + 1]
+                        groups.append(current.strip())
+                        current = s[last_punct + 1:]
+                    else:
+                        groups.append(current.strip())
+                        current = s
                 else:
                     current = (current + s) if current else s
             if current:
@@ -215,8 +229,19 @@ class ParagraphSynthesizer:
                 cur = ""
                 for p in sparts:
                     if len(cur) + len(p) > max_chars and cur:
-                        sub_groups.append(cur.strip())
-                        cur = p
+                        look_ahead = p[:LOOK_AHEAD_CHARS]
+                        last_punct = -1
+                        for punct in '。！？.!?':
+                            pos = look_ahead.rfind(punct)
+                            if pos > last_punct:
+                                last_punct = pos
+                        if last_punct > 0:
+                            cur += p[:last_punct + 1]
+                            sub_groups.append(cur.strip())
+                            cur = p[last_punct + 1:]
+                        else:
+                            sub_groups.append(cur.strip())
+                            cur = p
                     else:
                         cur = (cur + p) if cur else p
                 if cur:

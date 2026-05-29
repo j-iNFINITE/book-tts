@@ -9,6 +9,16 @@ from __future__ import annotations
 import re
 from typing import List
 
+from book_tts.parsers.number_converter import convert_all
+
+try:
+    from tn.chinese.normalizer import Normalizer as ZhNormalizer
+
+    _WETEXT_AVAILABLE = True
+except ImportError:
+    _WETEXT_AVAILABLE = False
+    ZhNormalizer = None  # type: ignore[assignment,misc]
+
 # Bracket removal: each pattern matches a full bracket pair including contents.
 _BRACKET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"[（）]"),          # Chinese parentheses
@@ -22,10 +32,16 @@ _MULTI_SPACE = re.compile(r"[ \t]+")
 _MULTI_NEWLINE = re.compile(r"\n{2,}")
 
 # Patterns for fixing Calibre HTML span artifacts
-_SPACE_BETWEEN_CJK = re.compile(r"(?<=\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])")
+_SPACE_BETWEEN_CJK = re.compile(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])")
 _SPACE_BETWEEN_DIGITS = re.compile(r"(?<=\d)\s+(?=\d)")
 _SPACE_BETWEEN_DIGIT_CJK = re.compile(r"(?<=\d)\s+(?=[\u4e00-\u9fff])")
 _SPACE_BETWEEN_CJK_DIGIT = re.compile(r"(?<=[\u4e00-\u9fff])\s+(?=\d)")
+_SPACE_BETWEEN_CJK_PUNCT = re.compile(r"(?<=[\u4e00-\u9fff])\s+(?=[，。！？、；：\u201c\u201d\u2018\u2019《》【】（）])")
+_SPACE_BETWEEN_PUNCT_CJK = re.compile(r"(?<=[，。！？、；：\u201c\u201d\u2018\u2019《》【】（）])\s+(?=[\u4e00-\u9fff])")
+
+# URL/email protection patterns (MOSS-TTS-Nano style)
+_URL_PATTERN = re.compile(r"https?://[^\s]+|www\.[^\s]+|[\w.]+@[\w.]+\.\w+")
+_PLACEHOLDER_PREFIX = "\x00PROTECTED_"
 
 
 class TextCleaner:
@@ -40,6 +56,13 @@ class TextCleaner:
 
     def __init__(self, language: str = "auto") -> None:
         self.language = language
+        if _WETEXT_AVAILABLE:
+            try:
+                self._zh_normalizer = ZhNormalizer(remove_erhua=False)
+            except Exception:
+                self._zh_normalizer = None
+        else:
+            self._zh_normalizer = None
 
     def clean(self, text: str) -> str:
         """Run the full cleaning pipeline on *text* and return the result.
@@ -51,11 +74,15 @@ class TextCleaner:
         if not text:
             return ""
 
+        text, protected = self._protect_spans(text)
         text = self._remove_brackets(text)
         text = self._normalize_whitespace(text)
         text = self._fix_internal_spaces(text)
+        text = self._normalize_punctuation(text)
         text = self._clean_chinese(text)
         text = self._clean_english(text)
+        text = convert_all(text)
+        text = self._restore_spans(text, protected)
 
         return text.strip()
 
@@ -141,15 +168,42 @@ class TextCleaner:
           '小泉 纯一郎' → '小泉纯一郎'
           '2001 年' → '2001年'
         """
-        cjk = r"[\u4e00-\u9fff\u3400-\u4dbf]"
-        cjk_punct = r"[，。！？、；：\u201c\u201d\u2018\u2019《》【】（）]"
+        text = _SPACE_BETWEEN_CJK.sub("", text)
+        text = _SPACE_BETWEEN_DIGITS.sub("", text)
+        text = _SPACE_BETWEEN_DIGIT_CJK.sub("", text)
+        text = _SPACE_BETWEEN_CJK_DIGIT.sub("", text)
+        text = _SPACE_BETWEEN_CJK_PUNCT.sub("", text)
+        text = _SPACE_BETWEEN_PUNCT_CJK.sub("", text)
+        return text
 
-        text = re.sub(f"({cjk})\\s+({cjk})", r"\1\2", text)
-        text = re.sub(r"(\d)\s+(\d)", r"\1\2", text)
-        text = re.sub(f"(\\d)\\s+({cjk})", r"\1\2", text)
-        text = re.sub(f"({cjk})\\s+(\\d)", r"\1\2", text)
-        text = re.sub(f"({cjk})\\s+({cjk_punct})", r"\1\2", text)
-        text = re.sub(f"({cjk_punct})\\s+({cjk})", r"\1\2", text)
+    @staticmethod
+    def _protect_spans(text: str) -> tuple[str, dict[str, str]]:
+        """Replace URLs/emails with placeholders to prevent corruption during cleaning."""
+        protected: dict[str, str] = {}
+        counter = 0
+
+        def _replace(match: re.Match[str]) -> str:
+            nonlocal counter
+            key = f"{_PLACEHOLDER_PREFIX}{counter:04d}\x00"
+            protected[key] = match.group(0)
+            counter += 1
+            return key
+
+        text = _URL_PATTERN.sub(_replace, text)
+        return text, protected
+
+    @staticmethod
+    def _restore_spans(text: str, protected: dict[str, str]) -> str:
+        """Restore URLs/emails from placeholders."""
+        for key, value in protected.items():
+            text = text.replace(key, value)
+        return text
+
+    @staticmethod
+    def _normalize_punctuation(text: str) -> str:
+        text = re.sub(r"。{3,}", "……", text)
+        text = re.sub(r"！{2,}", "！", text)
+        text = re.sub(r"？{2,}", "？", text)
         return text
 
     @staticmethod
