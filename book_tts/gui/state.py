@@ -17,7 +17,7 @@ from book_tts.models import (
     ParseResult,
     TTSConfig,
 )
-from book_tts.parsers.epub_parser import EPUBParser
+from book_tts.parsers.epub_parser import EPUBParser, EPUBHTMLParser
 from book_tts.parsers.mobi_parser import MOBIParser
 from book_tts.parsers.markdown_parser import MarkdownParser
 from book_tts.pipeline import (
@@ -51,6 +51,7 @@ class ConversionState:
         self._pipeline: Optional[ConversionPipeline] = None
         self._conversion_thread: Optional[threading.Thread] = None
         self._epub_parser = EPUBParser()
+        self._epub_html_parser = EPUBHTMLParser()
         self._mobi_parser = MOBIParser()
         self._md_parser = MarkdownParser()
         self._checkpoint_summary: Optional[dict] = None
@@ -134,7 +135,7 @@ class ConversionState:
 
     # ── Parsing ───────────────────────────────────────────────────────────
 
-    def parse_file(self, file_path: str | Path) -> ParseResult:
+    def parse_file(self, file_path: str | Path, use_html_parser: bool = False) -> ParseResult:
         """Parse an EPUB or MOBI file and store the result.
 
         Returns the ParseResult for immediate use by the caller.
@@ -146,7 +147,10 @@ class ConversionState:
 
         suffix = path.suffix.lower()
         if suffix == ".epub":
-            result = self._epub_parser.parse(path)
+            if use_html_parser:
+                result = self._epub_html_parser.parse(path)
+            else:
+                result = self._epub_parser.parse(path)
         elif suffix in (".mobi", ".azw", ".azw3"):
             result = self._mobi_parser.parse(path)
         elif suffix in (".md", ".markdown"):

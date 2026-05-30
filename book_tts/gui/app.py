@@ -49,6 +49,12 @@ def create_app() -> gr.Blocks:
                 file_upload = create_file_upload()
                 tts_settings = create_tts_settings()
                 voice_preview = create_voice_preview()
+                parser_choice = gr.Radio(
+                    label="解析器",
+                    choices=["标准", "纯 HTML"],
+                    value="标准",
+                    info="标准：使用 EPUB 导航；纯 HTML：按文件顺序，用标题标签作章节名",
+                )
                 parse_btn = gr.Button("解析电子书", variant="secondary")
                 chapter_selector = create_chapter_selector()
                 book_info = gr.Markdown("")
@@ -143,7 +149,7 @@ def create_app() -> gr.Blocks:
 
         # ── Parse handler ─────────────────────────────────────────────
 
-        def handle_parse(file_paths: Optional[List[str]]) -> tuple:
+        def handle_parse(file_paths: Optional[List[str]], parser_choice: str) -> tuple:
             if not file_paths:
                 gr.Warning("请先上传文件")
                 return (
@@ -154,6 +160,7 @@ def create_app() -> gr.Blocks:
                     gr.update(value="", visible=False),
                 )
 
+            use_html_parser = parser_choice == "纯 HTML"
             all_choices = []
             all_info = []
             errors = []
@@ -161,7 +168,7 @@ def create_app() -> gr.Blocks:
 
             for fpath in file_paths:
                 try:
-                    result = state.parse_file(fpath)
+                    result = state.parse_file(fpath, use_html_parser=use_html_parser)
                     fname = Path(fpath).name
                     for ch in result.chapters:
                         label = f"[{fname}] {ch.index}: {ch.title} ({ch.word_count} 字)"
@@ -206,7 +213,7 @@ def create_app() -> gr.Blocks:
 
         parse_btn.click(
             fn=handle_parse,
-            inputs=[file_upload],
+            inputs=[file_upload, parser_choice],
             outputs=[chapter_selector, convert_btn, dry_run_btn, book_info, checkpoint_status],
         )
 

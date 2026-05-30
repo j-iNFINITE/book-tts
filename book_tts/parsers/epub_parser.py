@@ -786,3 +786,127 @@ class EPUBParser(BaseBookParser):
                             return item.get_content()
 
         return None
+
+
+class EPUBHTMLParser(BaseBookParser):
+    """Pure HTML parser for EPUB files.
+
+    Extracts all HTML files and uses <title> or <h1> as chapter names.
+    Does not use EPUB navigation structure.
+    """
+
+    def __init__(self, cleaner: Optional[TextCleaner] = None) -> None:
+        self.cleaner = cleaner or TextCleaner()
+
+    def get_supported_formats(self) -> List[str]:
+        return [".epub"]
+
+    def parse(
+        self,
+        file_path: str | Path,
+        progress_callback: Optional[Callable[[ConversionProgress], None]] = None,
+    ) -> ParseResult:
+        path = Path(file_path)
+        if not self.validate_file(path):
+            raise FileNotFoundError(f"EPUB file not found: {path}")
+
+        book = epub.read_epub(str(path), options={"ignore_ncx": False})
+        metadata = self._extract_metadata(book)
+        cover = self._extract_cover(book)
+
+        chapters: list[Chapter] = []
+        chapter_index = 0
+
+        for item in book.get_items_of_type(ITEM_DOCUMENT):
+            html = item.get_content().decode("utf-8", errors="replace")
+            soup = _soup(html)
+
+            title = self._extract_title(soup, item.get_name())
+            paragraphs = self._extract_paragraphs(soup)
+
+            cleaned = self.cleaner.clean_paragraphs(paragraphs)
+            if not cleaned:
+                continue
+            if sum(len(p) for p in cleaned) < MIN_VISIBLE_CHARS:
+                continue
+
+            boundaries = (BoundaryType.NONE,) + (BoundaryType.PARAGRAPH,) * (max(len(cleaned) - 1, 0))
+            chapters.append(Chapter(
+                index=chapter_index,
+                title=title,
+                paragraphs=tuple(cleaned),
+                source_file=item.get_name(),
+                boundaries=boundaries,
+            ))
+            chapter_index += 1
+
+        if progress_callback:
+            progress_callback(ConversionProgress(
+                status=ConversionStatus.COMPLETED,
+                total_chapters=len(chapters),
+                message=f"Parsed {len(chapters)} chapters",
+            ))
+
+        return ParseResult(
+            metadata=metadata,
+            chapters=tuple(chapters),
+            cover_image=cover,
+            toc=tuple(ch.title for ch in chapters),
+            parser_type=ParserType.EPUB,
+        )
+
+    def _extract_title(self, soup: BeautifulSoup, filename: str) -> str:
+        title_tag = soup.find("title")
+        if title_tag:
+            title = title_tag.get_text(strip=True)
+            if title:
+                return title
+
+        for tag in ["h1", "h2", "h3"]:
+            heading = soup.find(tag)
+            if heading:
+                text = heading.get_text(strip=True)
+                if text:
+                    return text
+
+        stem = Path(filename).stem
+        return stem.replace("_", " ").replace("-", " ").title()
+
+    def _extract_paragraphs(self, soup: BeautifulSoup) -> list[str]:
+        body = soup.find("body")
+        if not body:
+            return []
+
+        paragraphs: list[str] = []
+        for tag in body.find_all(["p", "div", "h1", "h2", "h3", "h4", "h5", "h6"]):
+            text = tag.get_text(strip=True)
+            if text:
+                paragraphs.append(text)
+        return paragraphs
+
+    def _extract_metadata(self, book: epub.EpubBook) -> BookMetadata:
+        title = ""
+        meta = book.get_metadata("DC", "title")
+        if meta:
+            title = meta[0][0]
+
+        author = ""
+        meta = book.get_metadata("DC", "creator")
+        if meta:
+            author = meta[0][0]
+
+        language = ""
+        meta = book.get_metadata("DC", "language")
+        if meta:
+            language = meta[0][0]
+
+        return BookMetadata(title=title, author=author, language=language)
+
+    def _extract_cover(self, book: epub.EpubBook) -> Optional[bytes]:
+        for item in book.get_items():
+            name = item.get_name().lower()
+            if any(kw in name for kw in ("cover", "front-cover")):
+                if hasattr(item, "media_type") and item.media_type:
+                    if item.media_type.startswith("image/"):
+                        return item.get_content()
+        return None

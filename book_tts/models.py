@@ -16,6 +16,7 @@ class ParserType(Enum):
     """Supported input formats."""
 
     EPUB = auto()
+    EPUB_HTML = auto()
     MOBI = auto()
     MARKDOWN = auto()
 
