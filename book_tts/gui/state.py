@@ -221,6 +221,7 @@ class ConversionState:
 
         with self._lock:
             self._pipeline = pipeline
+            pipeline._is_running = True
 
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
