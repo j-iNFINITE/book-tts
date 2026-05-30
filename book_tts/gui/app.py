@@ -54,7 +54,6 @@ def create_app() -> gr.Blocks:
                 chapter_selector = create_chapter_selector()
                 chapter_preview = create_chapter_preview()
                 book_info = gr.Markdown("")
-                cost_estimator = create_cost_estimator()
 
             with gr.Column(scale=1):
                 with gr.Row():
@@ -70,6 +69,7 @@ def create_app() -> gr.Blocks:
                     retry_btn = create_retry_button()
                 progress_display = create_progress_display()
                 completion_summary = create_completion_summary()
+                cost_estimator = create_cost_estimator()
                 dry_run_info = gr.Markdown("")
                 checkpoint_status = create_checkpoint_status()
                 output_format = gr.Radio(
