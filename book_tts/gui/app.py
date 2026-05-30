@@ -186,7 +186,7 @@ def create_app() -> gr.Blocks:
             show_checkpoint = bool(checkpoint_text)
 
             return (
-                gr.update(choices=all_choices, value=list(all_choices)),
+                gr.update(choices=all_choices, value=[]),
                 gr.update(interactive=True),
                 gr.update(interactive=True),
                 " | ".join(all_info),
