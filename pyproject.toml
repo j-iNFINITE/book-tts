@@ -35,10 +35,10 @@ dependencies = [
     "pydub",
     "tqdm",
     "gradio",
+    "mutagen",
 ]
 
 [project.optional-dependencies]
-audio = ["mutagen"]
 edge = ["edge-tts"]
 wetext = ["WeTextProcessing"]
 dev = [
