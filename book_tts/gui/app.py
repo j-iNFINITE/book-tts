@@ -72,6 +72,11 @@ def create_app() -> gr.Blocks:
                 completion_summary = create_completion_summary()
                 dry_run_info = gr.Markdown("")
                 checkpoint_status = create_checkpoint_status()
+                output_format = gr.Radio(
+                    label="输出格式",
+                    choices=["mp3", "m4b"],
+                    value="mp3",
+                )
                 output_dir_input = gr.Textbox(
                     label="输出目录",
                     value=str(DEFAULT_OUTPUT_DIR),
@@ -298,6 +303,7 @@ def create_app() -> gr.Blocks:
             style: str,
             api_keys_str: str,
             base_url: str,
+            output_format: str,
             output_dir: str,
         ) -> Generator:
             if voice and voice.strip():
@@ -375,6 +381,7 @@ def create_app() -> gr.Blocks:
                         input_path=Path(fpath),
                         output_dir=out_dir,
                         resume=True,
+                        output_format=output_format or "mp3",
                     )
                 except Exception as exc:
                     gr.Warning(f"处理 {fname} 失败: {exc}")
@@ -468,6 +475,7 @@ def create_app() -> gr.Blocks:
                 tts_settings.style,
                 tts_settings.api_keys,
                 tts_settings.base_url,
+                output_format,
                 output_dir_input,
             ],
             outputs=[
@@ -514,6 +522,7 @@ def create_app() -> gr.Blocks:
             style: str,
             api_keys_str: str,
             base_url: str,
+            output_format: str,
             output_dir: str,
         ) -> Generator:
             failed = state.failed_chapters
@@ -543,7 +552,7 @@ def create_app() -> gr.Blocks:
 
             yield from handle_convert(
                 file_paths, failed_values, voice, style,
-                api_keys_str, base_url, output_dir,
+                api_keys_str, base_url, output_format, output_dir,
             )
 
             still_failed = state.failed_chapters
@@ -577,6 +586,7 @@ def create_app() -> gr.Blocks:
                 tts_settings.style,
                 tts_settings.api_keys,
                 tts_settings.base_url,
+                output_format,
                 output_dir_input,
             ],
             outputs=[
