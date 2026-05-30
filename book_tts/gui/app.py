@@ -12,7 +12,6 @@ from book_tts.config import DEFAULT_BASE_URL, DEFAULT_OUTPUT_DIR, DEFAULT_VOICE,
 from book_tts.gui.components import (
     ProgressDisplay,
     TTSSettings,
-    create_chapter_preview,
     create_chapter_selector,
     create_checkpoint_status,
     create_completion_summary,
@@ -52,7 +51,6 @@ def create_app() -> gr.Blocks:
                 voice_preview = create_voice_preview()
                 parse_btn = gr.Button("解析电子书", variant="secondary")
                 chapter_selector = create_chapter_selector()
-                chapter_preview = create_chapter_preview()
                 book_info = gr.Markdown("")
 
             with gr.Column(scale=1):
@@ -64,7 +62,7 @@ def create_app() -> gr.Blocks:
                         "停止", variant="stop", interactive=False
                     )
                     dry_run_btn = gr.Button(
-                        "预览文本", variant="secondary", interactive=False
+                        "Dry Run", variant="secondary", interactive=False
                     )
                     retry_btn = create_retry_button()
                 progress_display = create_progress_display()
@@ -80,6 +78,19 @@ def create_app() -> gr.Blocks:
                 output_dir_input = gr.Textbox(
                     label="输出目录",
                     value=str(DEFAULT_OUTPUT_DIR),
+                )
+                gr.Markdown("---")
+                chapter_preview_dropdown = gr.Dropdown(
+                    label="查看章节",
+                    choices=[],
+                    value=None,
+                    interactive=True,
+                )
+                chapter_preview_text = gr.Textbox(
+                    label="章节预览",
+                    value="请先勾选章节",
+                    lines=10,
+                    interactive=False,
                 )
 
         # ── Voice preview handler ────────────────────────────────────
@@ -186,7 +197,7 @@ def create_app() -> gr.Blocks:
             show_checkpoint = bool(checkpoint_text)
 
             return (
-                gr.update(choices=all_choices, value=[]),
+                gr.update(choices=all_choices, value=list(all_choices)),
                 gr.update(interactive=True),
                 gr.update(interactive=True),
                 " | ".join(all_info),
@@ -604,15 +615,25 @@ def create_app() -> gr.Blocks:
 
         # ── Chapter preview handler ──────────────────────────────────
 
-        def handle_chapter_preview(chapter_values: list[str]) -> str:
-            if not chapter_values:
-                return "选择章节查看提取的文本"
+        # ── Chapter preview handlers ─────────────────────────────────
 
-            last = chapter_values[-1]
+        def update_preview_dropdown(chapter_values: list[str]) -> dict:
+            if not chapter_values:
+                return {
+                    chapter_preview_dropdown: gr.update(choices=[], value=None),
+                    chapter_preview_text: gr.update(value="请先勾选章节"),
+                }
+            return {
+                chapter_preview_dropdown: gr.update(choices=chapter_values, value=chapter_values[0]),
+            }
+
+        def handle_chapter_preview(selected_chapter: str) -> str:
+            if not selected_chapter:
+                return "请先勾选章节"
+
             try:
-                fname_end = last.index("]")
-                fname = last[1:fname_end]
-                idx = int(last[fname_end + 2:].split(":")[0])
+                fname_end = selected_chapter.index("]")
+                idx = int(selected_chapter[fname_end + 2:].split(":")[0])
             except (ValueError, IndexError):
                 return "选择无效"
 
@@ -621,15 +642,18 @@ def create_app() -> gr.Blocks:
                 return "章节未找到"
 
             chapter = parse_result.chapters[idx]
-            text = "\n\n".join(chapter.paragraphs)
-            if len(text) > 5000:
-                text = text[:5000] + "\n\n...（已截断）"
-            return f"### {chapter.title}\n\n{text}"
+            return "\n\n".join(chapter.paragraphs)
 
-        chapter_selector.select(
-            fn=handle_chapter_preview,
+        chapter_selector.change(
+            fn=update_preview_dropdown,
             inputs=[chapter_selector],
-            outputs=[chapter_preview],
+            outputs=[chapter_preview_dropdown, chapter_preview_text],
+        )
+
+        chapter_preview_dropdown.change(
+            fn=handle_chapter_preview,
+            inputs=[chapter_preview_dropdown],
+            outputs=[chapter_preview_text],
         )
 
     return app
