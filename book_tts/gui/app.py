@@ -322,6 +322,7 @@ def create_app() -> gr.Blocks:
             api_keys_str: str,
             base_url: str,
             output_format: str,
+            parser_choice: str,
             output_dir: str,
         ) -> Generator:
             if voice and voice.strip():
@@ -389,7 +390,7 @@ def create_app() -> gr.Blocks:
                 }
 
                 try:
-                    state.parse_file(fpath)
+                    state.parse_file(fpath, use_html_parser=(parser_choice == "纯 HTML"))
                     state.set_selected_chapters(chapter_indices)
                     state.start_conversion(
                         voice=voice or DEFAULT_VOICE,
@@ -494,6 +495,7 @@ def create_app() -> gr.Blocks:
                 tts_settings.api_keys,
                 tts_settings.base_url,
                 output_format,
+                parser_choice,
                 output_dir_input,
             ],
             outputs=[
@@ -541,6 +543,7 @@ def create_app() -> gr.Blocks:
             api_keys_str: str,
             base_url: str,
             output_format: str,
+            parser_choice: str,
             output_dir: str,
         ) -> Generator:
             failed = state.failed_chapters
@@ -570,7 +573,7 @@ def create_app() -> gr.Blocks:
 
             yield from handle_convert(
                 file_paths, failed_values, voice, style,
-                api_keys_str, base_url, output_format, output_dir,
+                api_keys_str, base_url, output_format, parser_choice, output_dir,
             )
 
             still_failed = state.failed_chapters
@@ -605,6 +608,7 @@ def create_app() -> gr.Blocks:
                 tts_settings.api_keys,
                 tts_settings.base_url,
                 output_format,
+                parser_choice,
                 output_dir_input,
             ],
             outputs=[
