@@ -185,6 +185,7 @@ class ConversionPipeline:
         input_path: Path,
         chapter_indices: Optional[list[int]] = None,
         resume: bool = False,
+        parse_result: Optional[ParseResult] = None,
     ) -> Iterator[PipelineEvent]:
         """Run the full conversion pipeline, yielding events as progress is made."""
         self._cancel_event.clear()
@@ -198,7 +199,8 @@ class ConversionPipeline:
             self._chapter_files = []
         start_time = time.monotonic()
 
-        parse_result = self._parse(input_path)
+        if parse_result is None:
+            parse_result = self._parse(input_path)
         chapters = parse_result.chapters
         if not chapters:
             yield ErrorEvent("No chapters found in the ebook.")

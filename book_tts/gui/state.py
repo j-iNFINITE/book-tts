@@ -225,7 +225,7 @@ class ConversionState:
 
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
-            args=(pipeline, input_p, chapters, resume),
+            args=(pipeline, input_p, chapters, resume, self._parse_result),
             daemon=True,
             name="conversion-worker",
         )
@@ -237,10 +237,11 @@ class ConversionState:
         input_path: Path,
         chapter_indices: List[int],
         resume: bool = False,
+        parse_result: Optional[ParseResult] = None,
     ) -> None:
         try:
             successful: set[int] = set()
-            for event in pipeline.convert(input_path, chapter_indices, resume=resume):
+            for event in pipeline.convert(input_path, chapter_indices, resume=resume, parse_result=parse_result):
                 if isinstance(event, ChapterDoneEvent):
                     successful.add(event.index)
             failed = set(chapter_indices) - successful
