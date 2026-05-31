@@ -670,10 +670,18 @@ def _stream_progress(
     state: ConversionState,
     progress_display: ProgressDisplay,
 ) -> Generator:
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.debug("_stream_progress: entering, is_converting=%s", state.is_converting)
+    
     while state.is_converting:
         progress = state.get_progress()
         pct = _compute_percent(progress)
         status = _format_status(progress)
+        
+        logger.debug("_stream_progress: pct=%.1f, status=%s, current=%d, total=%d", 
+                     pct, status, progress.current_chapter, progress.total_chapters)
 
         yield {
             progress_display.status_text: status,
@@ -684,6 +692,8 @@ def _stream_progress(
     final = state.get_progress()
     pct = _compute_percent(final)
     status = _format_status(final)
+    
+    logger.debug("_stream_progress: final pct=%.1f, status=%s", pct, status)
 
     yield {
         progress_display.status_text: status,
