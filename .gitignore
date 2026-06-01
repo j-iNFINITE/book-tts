@@ -1,9 +1,12 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 .claude/
 .agents/
+.omo/
 .venv/
 audiobook_output/
+test_files/
 book_tts.egg-info/
 build/
 dist/
