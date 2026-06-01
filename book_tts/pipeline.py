@@ -378,6 +378,10 @@ class ConversionPipeline:
                     if self._tracker is not None:
                         self._tracker.add_chapter_file(built)
                     logger.info("M4B audiobook built: %s", built)
+                    for ch_path in chapter_audio_paths:
+                        if ch_path.exists():
+                            ch_path.unlink(missing_ok=True)
+                    shutil.rmtree(chapters_dir, ignore_errors=True)
                 except Exception as exc:
                     logger.warning("M4B build failed, keeping chapter files: %s", exc)
 
