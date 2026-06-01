@@ -32,12 +32,14 @@ from book_tts.pipeline import (
     ErrorEvent,
 )
 from book_tts.utils.history import record as history_record, load_history
+from book_tts.utils import preferences
 
 POLL_INTERVAL = 0.5
 
 
 def create_app() -> gr.Blocks:
     state = ConversionState()
+    prefs = preferences.load()
 
     with gr.Blocks(
         title="Book TTS - 电子书转有声书",
@@ -52,7 +54,7 @@ def create_app() -> gr.Blocks:
                 parser_choice = gr.Radio(
                     label="解析器",
                     choices=["标准", "纯 HTML"],
-                    value="标准",
+                    value=prefs.get("parser", "标准"),
                     info="标准：使用 EPUB 导航；纯 HTML：按文件顺序，用标题标签作章节名",
                 )
                 parse_btn = gr.Button("解析电子书", variant="secondary")
@@ -79,12 +81,12 @@ def create_app() -> gr.Blocks:
                 output_format = gr.Radio(
                     label="输出格式",
                     choices=["mp3", "m4b"],
-                    value="m4b",
+                    value=prefs.get("format", "m4b"),
                 )
                 bitrate = gr.Dropdown(
                     label="比特率 (仅 M4B)",
                     choices=["64k", "96k", "128k", "192k"],
-                    value="64k",
+                    value=prefs.get("bitrate", "64k"),
                 )
                 output_dir_input = gr.Textbox(
                     label="输出目录",
@@ -677,6 +679,10 @@ def create_app() -> gr.Blocks:
             inputs=[chapter_preview_dropdown],
             outputs=[chapter_preview_text],
         )
+
+        parser_choice.change(fn=lambda v: preferences.set("parser", v), inputs=[parser_choice])
+        output_format.change(fn=lambda v: preferences.set("format", v), inputs=[output_format])
+        bitrate.change(fn=lambda v: preferences.set("bitrate", v), inputs=[bitrate])
 
     return app
 
