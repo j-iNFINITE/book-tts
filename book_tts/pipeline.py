@@ -53,6 +53,7 @@ class PipelineConfig:
     tts: TTSConfig
     output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
     output_format: str = "m4b"  # "mp3" or "m4b"
+    bitrate: str = "64k"
 
 
 # ── Events ────────────────────────────────────────────────────────────────────
@@ -362,7 +363,7 @@ class ConversionPipeline:
             final_files: list[Path] = list(chapter_audio_paths)
             if self._config.output_format == "m4b":
                 m4b_path = book_dir / f"{sanitize_filename(book_name)}.m4b"
-                m4b_builder = M4BBuilder()
+                m4b_builder = M4BBuilder(bitrate=self._config.bitrate)
                 try:
                     built = m4b_builder.build(
                         chapter_paths=chapter_audio_paths,

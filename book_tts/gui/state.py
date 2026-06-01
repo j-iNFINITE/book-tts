@@ -193,6 +193,7 @@ class ConversionState:
         output_dir: Optional[Path] = None,
         resume: bool = False,
         output_format: str = "m4b",
+        bitrate: str = "64k",
     ) -> None:
         """Start conversion in a background thread.
 
@@ -221,7 +222,7 @@ class ConversionState:
             base_url=base_url,
         )
 
-        config = PipelineConfig(tts=tts_config, output_dir=out_dir, output_format=output_format)
+        config = PipelineConfig(tts=tts_config, output_dir=out_dir, output_format=output_format, bitrate=bitrate)
         tracker = ProgressTracker(total_chapters=len(chapters))
         pipeline = ConversionPipeline(config, tracker=tracker)
 

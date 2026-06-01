@@ -81,6 +81,11 @@ def create_app() -> gr.Blocks:
                     choices=["mp3", "m4b"],
                     value="m4b",
                 )
+                bitrate = gr.Dropdown(
+                    label="比特率 (仅 M4B)",
+                    choices=["64k", "96k", "128k", "192k"],
+                    value="64k",
+                )
                 output_dir_input = gr.Textbox(
                     label="输出目录",
                     value=str(DEFAULT_OUTPUT_DIR),
@@ -322,6 +327,7 @@ def create_app() -> gr.Blocks:
             api_keys_str: str,
             base_url: str,
             output_format: str,
+            bitrate: str,
             parser_choice: str,
             output_dir: str,
         ) -> Generator:
@@ -401,6 +407,7 @@ def create_app() -> gr.Blocks:
                         output_dir=out_dir,
                         resume=True,
                         output_format=output_format or "m4b",
+                        bitrate=bitrate or "64k",
                     )
                 except Exception as exc:
                     gr.Warning(f"处理 {fname} 失败: {exc}")
@@ -495,6 +502,7 @@ def create_app() -> gr.Blocks:
                 tts_settings.api_keys,
                 tts_settings.base_url,
                 output_format,
+                bitrate,
                 parser_choice,
                 output_dir_input,
             ],
@@ -543,6 +551,7 @@ def create_app() -> gr.Blocks:
             api_keys_str: str,
             base_url: str,
             output_format: str,
+            bitrate: str,
             parser_choice: str,
             output_dir: str,
         ) -> Generator:
@@ -573,7 +582,7 @@ def create_app() -> gr.Blocks:
 
             yield from handle_convert(
                 file_paths, failed_values, voice, style,
-                api_keys_str, base_url, output_format, parser_choice, output_dir,
+                api_keys_str, base_url, output_format, bitrate, parser_choice, output_dir,
             )
 
             still_failed = state.failed_chapters
@@ -608,6 +617,7 @@ def create_app() -> gr.Blocks:
                 tts_settings.api_keys,
                 tts_settings.base_url,
                 output_format,
+                bitrate,
                 parser_choice,
                 output_dir_input,
             ],
