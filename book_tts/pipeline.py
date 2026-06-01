@@ -215,7 +215,8 @@ class ConversionPipeline:
                 self._is_running = False
             return
 
-        book_dir, chapters_dir = self._prepare_dirs(input_path)
+        book_name = self._get_book_name(parse_result.metadata.title, input_path.stem)
+        book_dir, chapters_dir = self._prepare_dirs(input_path, book_name=book_name)
 
         checkpoint: Optional[CheckpointManager] = None
         if resume:
@@ -353,7 +354,7 @@ class ConversionPipeline:
             # ── Build M4B if requested ─────────────────────────────────────
             final_files: list[Path] = list(chapter_audio_paths)
             if self._config.output_format == "m4b":
-                m4b_path = book_dir / f"{input_path.stem}.m4b"
+                m4b_path = book_dir / f"{sanitize_filename(book_name)}.m4b"
                 m4b_builder = M4BBuilder()
                 try:
                     built = m4b_builder.build(
@@ -416,7 +417,8 @@ class ConversionPipeline:
             yield ErrorEvent("No chapters selected.")
             return
 
-        _, dry_dir = self._prepare_dirs(input_path, subdir="_dry_text")
+        book_name = self._get_book_name(parse_result.metadata.title, input_path.stem)
+        _, dry_dir = self._prepare_dirs(input_path, book_name=book_name, subdir="_dry_text")
 
         cleaner = TextCleaner()
         injector = MarkupInjector()
@@ -485,8 +487,18 @@ class ConversionPipeline:
         parser = _select_parser(input_path)
         return parser.parse(input_path)
 
-    def _prepare_dirs(self, input_path: Path, subdir: str = "chapters") -> tuple[Path, Path]:
-        book_stem = sanitize_filename(input_path.stem)
+    @staticmethod
+    def _get_book_name(metadata_title: str, fallback_stem: str) -> str:
+        source = metadata_title.strip() if metadata_title else fallback_stem
+        for sep in "（(：:—--｜|":
+            idx = source.find(sep)
+            if idx > 0:
+                source = source[:idx].rstrip()
+                break
+        return source
+
+    def _prepare_dirs(self, input_path: Path, book_name: str = "", subdir: str = "chapters") -> tuple[Path, Path]:
+        book_stem = sanitize_filename(book_name) if book_name else sanitize_filename(input_path.stem)
         book_dir = self._config.output_dir / book_stem
         sub_dir = book_dir / subdir
         sub_dir.mkdir(parents=True, exist_ok=True)
