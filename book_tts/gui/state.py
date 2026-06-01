@@ -61,14 +61,12 @@ class ConversionState:
 
     @property
     def parse_result(self) -> Optional[ParseResult]:
-        with self._lock:
-            if self._parse_results:
-                return list(self._parse_results.values())[-1]
-            return None
+        if self._parse_results:
+            return list(self._parse_results.values())[-1]
+        return None
 
     def get_parse_result(self, filename: str) -> Optional[ParseResult]:
-        with self._lock:
-            return self._parse_results.get(filename)
+        return self._parse_results.get(filename)
 
     @property
     def selected_chapters(self) -> List[int]:
