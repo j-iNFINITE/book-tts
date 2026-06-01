@@ -34,6 +34,9 @@ from book_tts.pipeline import (
 from book_tts.utils.history import record as history_record, load_history
 from book_tts.utils import preferences
 
+import logging
+logger = logging.getLogger(__name__)
+
 POLL_INTERVAL = 0.5
 
 
@@ -400,6 +403,7 @@ def create_app() -> gr.Blocks:
                 try:
                     state.parse_file(fpath, use_html_parser=(parser_choice == "纯 HTML"))
                     state.set_selected_chapters(chapter_indices)
+                    logger.debug("Starting conversion for %s with %d chapters", fname, len(chapter_indices))
                     state.start_conversion(
                         voice=voice or DEFAULT_VOICE,
                         style=style or DEFAULT_STYLE,
@@ -411,7 +415,9 @@ def create_app() -> gr.Blocks:
                         output_format=output_format or "m4b",
                         bitrate=bitrate or "64k",
                     )
+                    logger.debug("Conversion started, streaming progress for %s", fname)
                 except Exception as exc:
+                    logger.exception("Failed to process %s", fname)
                     gr.Warning(f"处理 {fname} 失败: {exc}")
                     continue
 
@@ -691,9 +697,6 @@ def _stream_progress(
     state: ConversionState,
     progress_display: ProgressDisplay,
 ) -> Generator:
-    import logging
-    logger = logging.getLogger(__name__)
-    
     logger.debug("_stream_progress: entering, is_converting=%s", state.is_converting)
     
     while state.is_converting:
