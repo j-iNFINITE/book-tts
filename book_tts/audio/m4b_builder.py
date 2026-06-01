@@ -180,6 +180,7 @@ class M4BBuilder:
                 "-i", list_file.name,
                 "-i", str(metadata_path),
                 "-map_metadata", "1",
+                "-af", "dynaudnorm",
                 "-c:a", "aac",
                 "-b:a", self.bitrate,
                 "-movflags", "+faststart",
