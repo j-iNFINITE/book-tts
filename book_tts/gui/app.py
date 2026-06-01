@@ -79,7 +79,7 @@ def create_app() -> gr.Blocks:
                 output_format = gr.Radio(
                     label="输出格式",
                     choices=["mp3", "m4b"],
-                    value="mp3",
+                    value="m4b",
                 )
                 output_dir_input = gr.Textbox(
                     label="输出目录",
@@ -400,7 +400,7 @@ def create_app() -> gr.Blocks:
                         input_path=Path(fpath),
                         output_dir=out_dir,
                         resume=True,
-                        output_format=output_format or "mp3",
+                        output_format=output_format or "m4b",
                     )
                 except Exception as exc:
                     gr.Warning(f"处理 {fname} 失败: {exc}")

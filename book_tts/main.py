@@ -82,8 +82,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--format",
         choices=["mp3", "m4b"],
-        default="mp3",
-        help="Output format (default: mp3)",
+        default="m4b",
+        help="Output format (default: m4b)",
     )
     parser.add_argument(
         "--dry-run",

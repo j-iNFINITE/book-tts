@@ -192,7 +192,7 @@ class ConversionState:
         input_path: Optional[Path] = None,
         output_dir: Optional[Path] = None,
         resume: bool = False,
-        output_format: str = "mp3",
+        output_format: str = "m4b",
     ) -> None:
         """Start conversion in a background thread.
 

@@ -52,7 +52,7 @@ class PipelineConfig:
 
     tts: TTSConfig
     output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
-    output_format: str = "mp3"  # "mp3" or "m4b"
+    output_format: str = "m4b"  # "mp3" or "m4b"
 
 
 # ── Events ────────────────────────────────────────────────────────────────────

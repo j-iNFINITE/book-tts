@@ -17,7 +17,7 @@ DEFAULT_OUTPUT_DIR: str = "audiobook_output"
 
 # ── Audio output ──────────────────────────────────────────────────────────────
 AUDIO_FORMAT: str = "mp3"
-OUTPUT_FORMAT: str = "mp3"  # Default; can be "m4b"
+OUTPUT_FORMAT: str = "m4b"
 
 # ── Concurrency / rate-limiting ───────────────────────────────────────────────
 MAX_WORKERS: int = 10
