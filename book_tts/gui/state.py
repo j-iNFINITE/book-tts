@@ -232,11 +232,13 @@ class ConversionState:
 
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
-            args=(pipeline, input_p, chapters, resume, self._parse_results.get(input_p.name)),
+            args=(pipeline, input_p, chapters, resume, self._parse_results.get(input_p.name), tracker),
             daemon=True,
             name="conversion-worker",
         )
         self._conversion_thread.start()
+        logger.info("Conversion thread started for %s (%d chapters, resume=%s)",
+                     input_p.name, len(chapters), resume)
 
     def _run_conversion(
         self,
@@ -245,7 +247,10 @@ class ConversionState:
         chapter_indices: List[int],
         resume: bool = False,
         parse_result: Optional[ParseResult] = None,
+        tracker: Optional[ProgressTracker] = None,
     ) -> None:
+        logger.info("_run_conversion: starting, chapters=%d, parse_result=%s",
+                     len(chapter_indices), parse_result is not None)
         try:
             successful: set[int] = set()
             for event in pipeline.convert(input_path, chapter_indices, resume=resume, parse_result=parse_result):
