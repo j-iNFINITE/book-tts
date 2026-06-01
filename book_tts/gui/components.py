@@ -33,7 +33,7 @@ class ProgressDisplay:
     """Typed container for progress display components."""
 
     status_text: gr.Textbox
-    progress_bar: gr.Slider
+    progress_bar: gr.HTML
 
 
 def create_file_upload() -> gr.File:
@@ -114,12 +114,11 @@ def create_progress_display() -> ProgressDisplay:
         value="就绪",
         interactive=False,
     )
-    progress_bar = gr.Slider(
-        label="进度",
-        minimum=0,
-        maximum=100,
-        value=0,
-        interactive=False,
+    progress_bar = gr.HTML(
+        value='<div style="background:#eee;border-radius:8px;height:24px;overflow:hidden">'
+              '<div style="background:linear-gradient(90deg,#667eea,#764ba2);height:100%;width:0%;'
+              'transition:width 0.3s;display:flex;align-items:center;justify-content:center;'
+              'color:#fff;font-size:12px">0%</div></div>',
     )
     return ProgressDisplay(
         status_text=status_text,

@@ -270,6 +270,8 @@ class ConversionPipeline:
                         self._chapter_files.append(chapter_output)
                     if self._tracker is not None:
                         self._tracker.add_chapter_file(chapter_output)
+                        self._tracker.update_chapter(pos + 1, total=len(selected),
+                                                     message=f"Skipped: {ch_title}")
                     yield ChapterDoneEvent(
                         index=ch_idx,
                         title=ch_title,
@@ -318,6 +320,8 @@ class ConversionPipeline:
                                 self._chapter_files.append(merged)
                             if self._tracker is not None:
                                 self._tracker.add_chapter_file(merged)
+                                self._tracker.update_chapter(pos + 1, total=len(selected),
+                                                             message=f"Done: {ch_title}")
                             if checkpoint is not None:
                                 checkpoint.mark_done(ch_idx, ch_title, str(merged))
                             yield ChapterDoneEvent(
@@ -327,6 +331,9 @@ class ConversionPipeline:
                             )
                 except Exception as exc:
                     logger.error("Chapter %d failed: %s", ch_idx, exc)
+                    if self._tracker is not None:
+                        self._tracker.update_chapter(pos + 1, total=len(selected),
+                                                     message=f"Failed: {ch_title}")
                     if checkpoint is not None:
                         checkpoint.mark_error(ch_idx, str(exc))
                     yield ProgressEvent(

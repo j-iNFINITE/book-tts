@@ -335,7 +335,7 @@ def create_app() -> gr.Blocks:
                 gr.Warning("未上传文件")
                 yield {
                     progress_display.status_text: "错误: 未上传文件",
-                    progress_display.progress_bar: 0,
+                    progress_display.progress_bar: _progress_html(0),
                 }
                 return
 
@@ -346,7 +346,7 @@ def create_app() -> gr.Blocks:
                 gr.Warning("请输入至少一个 API Key")
                 yield {
                     progress_display.status_text: "错误: 未提供 API Key",
-                    progress_display.progress_bar: 0,
+                    progress_display.progress_bar: _progress_html(0),
                 }
                 return
 
@@ -368,7 +368,7 @@ def create_app() -> gr.Blocks:
                 gr.Warning("请至少选择一个章节")
                 yield {
                     progress_display.status_text: "错误: 未选择章节",
-                    progress_display.progress_bar: 0,
+                    progress_display.progress_bar: _progress_html(0),
                 }
                 return
 
@@ -386,7 +386,7 @@ def create_app() -> gr.Blocks:
 
                 yield {
                     progress_display.status_text: f"处理文件 {completed}/{total_files}: {fname}",
-                    progress_display.progress_bar: 0,
+                    progress_display.progress_bar: _progress_html(0),
                 }
 
                 try:
@@ -410,7 +410,7 @@ def create_app() -> gr.Blocks:
 
             yield {
                 progress_display.status_text: f"全部 {total_files} 个文件处理完成",
-                progress_display.progress_bar: 100,
+                progress_display.progress_bar: _progress_html(100),
             }
 
             failed = state.failed_chapters
@@ -690,7 +690,7 @@ def _stream_progress(
 
         yield {
             progress_display.status_text: status,
-            progress_display.progress_bar: pct,
+            progress_display.progress_bar: _progress_html(pct),
         }
         time.sleep(POLL_INTERVAL)
 
@@ -704,6 +704,17 @@ def _stream_progress(
         progress_display.status_text: status,
         progress_display.progress_bar: pct,
     }
+
+
+def _progress_html(pct: float) -> str:
+    color = "#764ba2" if pct < 100 else "#27ae60"
+    return (
+        f'<div style="background:#eee;border-radius:8px;height:28px;overflow:hidden">'
+        f'<div style="background:linear-gradient(90deg,#667eea,{color});height:100%;'
+        f'width:{pct}%;transition:width 0.3s;display:flex;align-items:center;'
+        f'justify-content:center;color:#fff;font-size:13px;font-weight:bold">'
+        f'{pct:.0f}%</div></div>'
+    )
 
 
 def _compute_percent(progress) -> float:
