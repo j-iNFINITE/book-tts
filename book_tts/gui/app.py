@@ -644,11 +644,12 @@ def create_app() -> gr.Blocks:
 
             try:
                 fname_end = selected_chapter.index("]")
+                fname = selected_chapter[1:fname_end]
                 idx = int(selected_chapter[fname_end + 2:].split(":")[0])
             except (ValueError, IndexError):
                 return "选择无效"
 
-            parse_result = state.parse_result
+            parse_result = state.get_parse_result(fname)
             if parse_result is None or idx >= len(parse_result.chapters):
                 return "章节未找到"
 

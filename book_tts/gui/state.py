@@ -45,7 +45,7 @@ class ConversionState:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._parse_result: Optional[ParseResult] = None
+        self._parse_results: dict[str, ParseResult] = {}
         self._selected_chapters: List[int] = []
         self._output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
         self._pipeline: Optional[ConversionPipeline] = None
@@ -62,7 +62,13 @@ class ConversionState:
     @property
     def parse_result(self) -> Optional[ParseResult]:
         with self._lock:
-            return self._parse_result
+            if self._parse_results:
+                return list(self._parse_results.values())[-1]
+            return None
+
+    def get_parse_result(self, filename: str) -> Optional[ParseResult]:
+        with self._lock:
+            return self._parse_results.get(filename)
 
     @property
     def selected_chapters(self) -> List[int]:
@@ -162,7 +168,7 @@ class ConversionState:
             )
 
         with self._lock:
-            self._parse_result = result
+            self._parse_results[path.name] = result
             self._selected_chapters = list(range(len(result.chapters)))
             self._checkpoint_summary = self.check_checkpoint(path)
 
@@ -195,7 +201,7 @@ class ConversionState:
         with self._lock:
             if self._pipeline is not None and self._pipeline.is_running:
                 raise RuntimeError("Conversion already in progress")
-            if self._parse_result is None:
+            if self.parse_result is None:
                 raise RuntimeError("No file parsed yet")
             if not self._selected_chapters:
                 raise RuntimeError("No chapters selected")
@@ -225,7 +231,7 @@ class ConversionState:
 
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
-            args=(pipeline, input_p, chapters, resume, self._parse_result),
+            args=(pipeline, input_p, chapters, resume, self._parse_results.get(input_p.name)),
             daemon=True,
             name="conversion-worker",
         )
@@ -274,7 +280,7 @@ class ConversionState:
         with self._lock:
             if self._pipeline is not None and self._pipeline.is_running:
                 self._pipeline.cancel()
-            self._parse_result = None
+            self._parse_results.clear()
             self._selected_chapters = []
             self._pipeline = None
             self._failed_chapters.clear()
