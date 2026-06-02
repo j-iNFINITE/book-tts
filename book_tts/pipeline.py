@@ -210,11 +210,25 @@ class ConversionPipeline:
             return
 
         selected = list(chapter_indices) if chapter_indices else list(range(len(chapters)))
-        if not selected:
-            yield ErrorEvent("No chapters selected.")
+
+        max_idx = len(chapters) - 1
+        valid = [idx for idx in selected if 0 <= idx <= max_idx]
+        skipped = set(selected) - set(valid)
+        if skipped:
+            logger.warning(
+                "Skipping %d out-of-range chapter indices: %s (max valid: %d)",
+                len(skipped), sorted(skipped), max_idx,
+            )
+        if not valid:
+            yield ErrorEvent(
+                f"All {len(selected)} selected chapter indices are out of range "
+                f"(max valid: {max_idx}). The book may have been re-parsed with "
+                f"a different parser — try re-selecting chapters."
+            )
             with self._lock:
                 self._is_running = False
             return
+        selected = valid
 
         book_name = self._get_book_name(parse_result.metadata.title, input_path.stem)
         book_dir, chapters_dir = self._prepare_dirs(input_path, book_name=book_name)
@@ -428,6 +442,22 @@ class ConversionPipeline:
         if not selected:
             yield ErrorEvent("No chapters selected.")
             return
+
+        max_idx = len(chapters) - 1
+        valid = [idx for idx in selected if 0 <= idx <= max_idx]
+        skipped = set(selected) - set(valid)
+        if skipped:
+            logger.warning(
+                "Dry-run: skipping %d out-of-range chapter indices: %s (max valid: %d)",
+                len(skipped), sorted(skipped), max_idx,
+            )
+        if not valid:
+            yield ErrorEvent(
+                f"All {len(selected)} selected chapter indices are out of range "
+                f"(max valid: {max_idx})."
+            )
+            return
+        selected = valid
 
         book_name = self._get_book_name(parse_result.metadata.title, input_path.stem)
         _, dry_dir = self._prepare_dirs(input_path, book_name=book_name, subdir="_dry_text")
