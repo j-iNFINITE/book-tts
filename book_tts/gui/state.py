@@ -46,6 +46,7 @@ class ConversionState:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._parse_results: dict[str, ParseResult] = {}
+        self._file_paths: list[str] = []
         self._selected_chapters: List[int] = []
         self._output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
         self._pipeline: Optional[ConversionPipeline] = None
@@ -115,6 +116,18 @@ class ConversionState:
         with self._lock:
             self._failed_chapters.clear()
 
+    def set_file_paths(self, paths: list[str]) -> None:
+        """Store the list of uploaded file paths for label resolution."""
+        with self._lock:
+            self._file_paths = list(paths)
+
+    def get_file_path(self, index: int) -> Optional[str]:
+        """Return full path for a file index, or None if out of range."""
+        with self._lock:
+            if 0 <= index < len(self._file_paths):
+                return self._file_paths[index]
+            return None
+
     def check_checkpoint(self, file_path: str | Path, output_dir: Optional[Path] = None) -> Optional[dict]:
         """Check if a checkpoint exists for the given file.
 
@@ -166,7 +179,7 @@ class ConversionState:
             )
 
         with self._lock:
-            self._parse_results[path.name] = result
+            self._parse_results[str(path)] = result
             self._selected_chapters = list(range(len(result.chapters)))
             self._checkpoint_summary = self.check_checkpoint(path)
 
@@ -230,7 +243,7 @@ class ConversionState:
 
         self._conversion_thread = threading.Thread(
             target=self._run_conversion,
-            args=(pipeline, input_p, chapters, resume, self._parse_results.get(input_p.name), tracker),
+            args=(pipeline, input_p, chapters, resume, self._parse_results.get(str(input_p)), tracker),
             daemon=True,
             name="conversion-worker",
         )
@@ -285,6 +298,7 @@ class ConversionState:
             if self._pipeline is not None and self._pipeline.is_running:
                 self._pipeline.cancel()
             self._parse_results.clear()
+            self._file_paths = []
             self._selected_chapters = []
             self._pipeline = None
             self._failed_chapters.clear()

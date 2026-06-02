@@ -176,12 +176,14 @@ def create_app() -> gr.Blocks:
             errors = []
             checkpoint_messages = []
 
-            for fpath in file_paths:
+            state.set_file_paths(file_paths)
+
+            for idx, fpath in enumerate(file_paths):
                 try:
                     result = state.parse_file(fpath, use_html_parser=use_html_parser)
                     fname = Path(fpath).name
                     for ch in result.chapters:
-                        label = f"[{fname}] {ch.index}: {ch.title} ({ch.word_count} 字)"
+                        label = f"[{idx}|{fname}] {ch.index}: {ch.title} ({ch.word_count} 字)"
                         all_choices.append(label)
                     meta = result.metadata
                     info = f"**{fname}**: {len(result.chapters)} 章"
@@ -243,24 +245,20 @@ def create_app() -> gr.Blocks:
             summary_lines: list[str] = []
             total_result: Optional[str] = None
 
-            for fpath in file_paths:
-                fname = Path(fpath).name
+            for fpath_str in file_paths:
+                fname = Path(fpath_str).name
                 file_indices: list[int] = []
                 for val in chapter_values:
-                    if val.startswith(f"[{fname}]"):
-                        try:
-                            fname_end = val.index("]")
-                            idx = int(val[fname_end + 2:].split(":")[0])
-                            file_indices.append(idx)
-                        except (ValueError, IndexError):
-                            continue
+                    label_path, idx = _parse_label(val, state)
+                    if label_path == fpath_str and idx >= 0:
+                        file_indices.append(idx)
                 if not file_indices:
                     continue
 
                 config = PipelineConfig(tts=TTSConfig(), output_dir=out_dir)
                 pipeline = ConversionPipeline(config)
 
-                for event in pipeline.dry_run(Path(fpath), file_indices):
+                for event in pipeline.dry_run(Path(fpath_str), file_indices):
                     if isinstance(event, ChapterDoneEvent):
                         summary_lines.append(f"**{fname}**: {event.title} → `{event.path}`")
                     elif isinstance(event, ErrorEvent):
@@ -292,19 +290,14 @@ def create_app() -> gr.Blocks:
             except ValueError:
                 return "价格无效"
 
-            parse_result = state.parse_result
-            if parse_result is None:
-                return "未解析书籍"
-
             total_chars = 0
             for val in chapter_values:
-                try:
-                    fname_end = val.index("]")
-                    idx = int(val[fname_end + 2:].split(":")[0])
-                    if idx < len(parse_result.chapters):
-                        total_chars += parse_result.chapters[idx].word_count
-                except (ValueError, IndexError):
+                full_path, idx = _parse_label(val, state)
+                if idx < 0:
                     continue
+                parse_result = state.get_parse_result(full_path)
+                if parse_result is not None and idx < len(parse_result.chapters):
+                    total_chars += parse_result.chapters[idx].word_count
 
             total_tokens = int(total_chars * 1.5)
             cost = (total_tokens / 1_000_000) * price
@@ -363,17 +356,11 @@ def create_app() -> gr.Blocks:
 
             history_record(api_keys=api_keys, base_url=(base_url or "").strip())
 
-            # Group selected chapters by file
             file_chapters: dict[str, list[int]] = {}
             for val in chapter_values:
-                try:
-                    if val.startswith("["):
-                        fname_end = val.index("]")
-                        fname = val[1:fname_end]
-                        idx = int(val[fname_end + 2:].split(":")[0])
-                        file_chapters.setdefault(fname, []).append(idx)
-                except (ValueError, IndexError):
-                    continue
+                fpath, idx = _parse_label(val, state)
+                if fpath and idx >= 0:
+                    file_chapters.setdefault(fpath, []).append(idx)
 
             if not file_chapters:
                 gr.Warning("请至少选择一个章节")
@@ -387,13 +374,10 @@ def create_app() -> gr.Blocks:
             total_files = len(file_chapters)
             completed = 0
 
-            for fpath in file_paths:
-                fname = Path(fpath).name
-                if fname not in file_chapters:
-                    continue
-
+            for fpath_str, chapter_indices in file_chapters.items():
+                fpath = Path(fpath_str)
+                fname = fpath.name
                 completed += 1
-                chapter_indices = file_chapters[fname]
 
                 yield {
                     progress_display.status_text: f"处理文件 {completed}/{total_files}: {fname}",
@@ -660,14 +644,11 @@ def create_app() -> gr.Blocks:
             if not selected_chapter:
                 return "请先勾选章节"
 
-            try:
-                fname_end = selected_chapter.index("]")
-                fname = selected_chapter[1:fname_end]
-                idx = int(selected_chapter[fname_end + 2:].split(":")[0])
-            except (ValueError, IndexError):
+            full_path, idx = _parse_label(selected_chapter, state)
+            if idx < 0 or not full_path:
                 return "选择无效"
 
-            parse_result = state.get_parse_result(fname)
+            parse_result = state.get_parse_result(full_path)
             if parse_result is None or idx >= len(parse_result.chapters):
                 return "章节未找到"
 
@@ -743,12 +724,31 @@ def _compute_percent(progress) -> float:
     return round((progress.current_chapter / total) * 100, 1)
 
 
+def _parse_label(label: str, state: ConversionState) -> tuple[str, int]:
+    """Parse a chapter label into (full_file_path, chapter_idx).
+
+    Label format: ``[{file_idx}|{filename}] {ch.index}: {ch.title} (...)``
+
+    Returns ``("", -1)`` on failure.
+    """
+    val = label.removeprefix("❌ ")
+    try:
+        end = val.index("]")
+        head = val[1:end]
+        file_idx = int(head.split("|")[0])
+        full_path = state.get_file_path(file_idx) or ""
+        idx = int(val[end + 2:].split(":")[0])
+        return full_path, idx
+    except (ValueError, IndexError):
+        return "", -1
+
+
 def _get_chapter_idx(choice: str) -> int:
     """Extract chapter index from a selector choice string."""
     val = choice.removeprefix("❌ ")
     try:
-        fname_end = val.index("]")
-        return int(val[fname_end + 2:].split(":")[0])
+        end = val.index("]")
+        return int(val[end + 2:].split(":")[0])
     except (ValueError, IndexError):
         return -1
 
