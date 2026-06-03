@@ -133,8 +133,21 @@ class EPUBParser(BaseBookParser):
                         title=ch.title,
                         paragraphs=tuple(cleaned_paras),
                         source_file=ch.source_file,
+                        boundaries=ch.boundaries,
                     )
                 )
+
+        # Re-index after cleaning — some chapters may have been filtered out.
+        cleaned_chapters = [
+            Chapter(
+                index=i,
+                title=ch.title,
+                paragraphs=ch.paragraphs,
+                source_file=ch.source_file,
+                boundaries=ch.boundaries,
+            )
+            for i, ch in enumerate(cleaned_chapters)
+        ]
 
         toc_titles = tuple(ch.title for ch in cleaned_chapters)
 
