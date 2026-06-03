@@ -272,8 +272,10 @@ class ConversionState:
                 self._failed_chapters = failed
         except Exception as exc:
             logger.error("Conversion failed: %s", exc, exc_info=True)
-            tracker.set_error(str(exc))
+            if tracker is not None:
+                tracker.set_error(str(exc))
             with self._lock:
+                pipeline._is_running = False
                 self._failed_chapters = set(chapter_indices)
 
     def cancel(self) -> None:
